@@ -1,53 +1,49 @@
 -- Insert a demo restaurant
 INSERT INTO restaurants (id, name, address, phone, email) VALUES
-  ('550e8400-e29b-41d4-a716-446655440000', 'Demo Restaurant', '123 Main St, Istanbul', '+90 212 555 0100', 'info@demorestaurant.com')
-ON CONFLICT DO NOTHING;
+  ('11111111-1111-1111-1111-111111111111', 'Demo Restaurant', 'Istanbul, Turkey', '+90 555 123 4567', 'info@demo-restaurant.com')
+ON CONFLICT (id) DO NOTHING;
 
--- Insert demo users (password: demo123 for all)
--- Note: In production, use bcrypt hashed passwords
-INSERT INTO users (id, email, password_hash, name, role, restaurant_id, is_email_verified) VALUES
-  ('660e8400-e29b-41d4-a716-446655440001', 'admin@demo.com', '$2a$10$rBV2KU6P3VVZDXhNjKJZ0.ZP4gVYYXXKJv7rKxKXZXBPLV5XKZXK.', 'Admin User', 'admin', '550e8400-e29b-41d4-a716-446655440000', true),
-  ('660e8400-e29b-41d4-a716-446655440002', 'manager@demo.com', '$2a$10$rBV2KU6P3VVZDXhNjKJZ0.ZP4gVYYXXKJv7rKxKXZXBPLV5XKZXK.', 'Manager User', 'manager', '550e8400-e29b-41d4-a716-446655440000', true),
-  ('660e8400-e29b-41d4-a716-446655440003', 'waiter@demo.com', '$2a$10$rBV2KU6P3VVZDXhNjKJZ0.ZP4gVYYXXKJv7rKxKXZXBPLV5XKZXK.', 'Waiter User', 'waiter', '550e8400-e29b-41d4-a716-446655440000', true),
-  ('660e8400-e29b-41d4-a716-446655440004', 'kitchen@demo.com', '$2a$10$rBV2KU6P3VVZDXhNjKJZ0.ZP4gVYYXXKJv7rKxKXZXBPLV5XKZXK.', 'Kitchen User', 'kitchen', '550e8400-e29b-41d4-a716-446655440000', true)
-ON CONFLICT DO NOTHING;
+-- Insert demo users (password for all: demo123)
+-- Password hash for 'demo123': $2a$10$YourHashHere (you'll need to generate this with bcrypt)
+INSERT INTO users (id, email, password_hash, name, role, restaurant_id, is_verified) VALUES
+  ('22222222-2222-2222-2222-222222222222', 'admin@demo.com', '$2a$10$rOJ7pXrXJKJHF4KqKqKqKuDKDKDKDKDKDKDKDKDKDKDKDKDKD', 'Admin User', 'admin', '11111111-1111-1111-1111-111111111111', true),
+  ('33333333-3333-3333-3333-333333333333', 'manager@demo.com', '$2a$10$rOJ7pXrXJKJHF4KqKqKqKuDKDKDKDKDKDKDKDKDKDKDKDKDKD', 'Manager User', 'manager', '11111111-1111-1111-1111-111111111111', true),
+  ('44444444-4444-4444-4444-444444444444', 'waiter@demo.com', '$2a$10$rOJ7pXrXJKJHF4KqKqKqKuDKDKDKDKDKDKDKDKDKDKDKDKDKD', 'Waiter User', 'waiter', '11111111-1111-1111-1111-111111111111', true),
+  ('55555555-5555-5555-5555-555555555555', 'kitchen@demo.com', '$2a$10$rOJ7pXrXJKJHF4KqKqKqKuDKDKDKDKDKDKDKDKDKDKDKDKDKD', 'Kitchen User', 'kitchen', '11111111-1111-1111-1111-111111111111', true)
+ON CONFLICT (email) DO NOTHING;
 
 -- Insert demo categories
-INSERT INTO categories (name, restaurant_id) VALUES
-  ('Burgers', '550e8400-e29b-41d4-a716-446655440000'),
-  ('Pizza', '550e8400-e29b-41d4-a716-446655440000'),
-  ('Salads', '550e8400-e29b-41d4-a716-446655440000'),
-  ('Beverages', '550e8400-e29b-41d4-a716-446655440000'),
-  ('Desserts', '550e8400-e29b-41d4-a716-446655440000')
+INSERT INTO categories (id, name, restaurant_id) VALUES
+  ('c1111111-1111-1111-1111-111111111111', 'Başlangıçlar', '11111111-1111-1111-1111-111111111111'),
+  ('c2222222-2222-2222-2222-222222222222', 'Ana Yemekler', '11111111-1111-1111-1111-111111111111'),
+  ('c3333333-3333-3333-3333-333333333333', 'Tatlılar', '11111111-1111-1111-1111-111111111111'),
+  ('c4444444-4444-4444-4444-444444444444', 'İçecekler', '11111111-1111-1111-1111-111111111111')
 ON CONFLICT DO NOTHING;
 
 -- Insert demo products
-INSERT INTO products (name, description, price, category_id, restaurant_id, is_available) 
-SELECT 
-  'Classic Burger', 
-  'Beef patty with lettuce, tomato, and cheese', 
-  89.90, 
-  id, 
-  '550e8400-e29b-41d4-a716-446655440000', 
-  true 
-FROM categories WHERE name = 'Burgers' AND restaurant_id = '550e8400-e29b-41d4-a716-446655440000' LIMIT 1
-ON CONFLICT DO NOTHING;
-
-INSERT INTO products (name, description, price, category_id, restaurant_id, is_available) 
-SELECT 
-  'Margherita Pizza', 
-  'Classic pizza with mozzarella and basil', 
-  129.90, 
-  id, 
-  '550e8400-e29b-41d4-a716-446655440000', 
-  true 
-FROM categories WHERE name = 'Pizza' AND restaurant_id = '550e8400-e29b-41d4-a716-446655440000' LIMIT 1
+INSERT INTO products (id, name, description, price, category_id, restaurant_id, is_available) 
+VALUES 
+    ('p1111111-1111-1111-1111-111111111111', 'Çorba', 'Günün çorbası', 45.00, 'c1111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-111111111111', true),
+    ('p2222222-2222-2222-2222-222222222222', 'Salata', 'Mevsim salatası', 55.00, 'c1111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-111111111111', true),
+    ('p3333333-3333-3333-3333-333333333333', 'Izgara Köfte', 'Özel soslu ızgara köfte', 180.00, 'c2222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', true),
+    ('p4444444-4444-4444-4444-444444444444', 'Tavuk Şiş', 'Izgara tavuk şiş', 160.00, 'c2222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111', true),
+    ('p5555555-5555-5555-5555-555555555555', 'Baklava', 'Fıstıklı baklava', 85.00, 'c3333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111', true),
+    ('p6666666-6666-6666-6666-666666666666', 'Künefe', 'Sıcak künefe', 95.00, 'c3333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111', true),
+    ('p7777777-7777-7777-7777-777777777777', 'Çay', 'Fincan çay', 15.00, 'c4444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', true),
+    ('p8888888-8888-8888-8888-888888888888', 'Ayran', 'Soğuk ayran', 20.00, 'c4444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', true)
 ON CONFLICT DO NOTHING;
 
 -- Insert demo tables
-INSERT INTO tables (table_number, capacity, status, x_position, y_position, restaurant_id) VALUES
-  (1, 4, 'available', 100, 100, '550e8400-e29b-41d4-a716-446655440000'),
-  (2, 2, 'available', 300, 100, '550e8400-e29b-41d4-a716-446655440000'),
-  (3, 6, 'available', 100, 300, '550e8400-e29b-41d4-a716-446655440000'),
-  (4, 4, 'available', 300, 300, '550e8400-e29b-41d4-a716-446655440000')
+INSERT INTO tables (id, table_number, capacity, status, restaurant_id, x_position, y_position) VALUES
+  ('t1111111-1111-1111-1111-111111111111', 1, 4, 'available', '11111111-1111-1111-1111-111111111111', 100, 100),
+  ('t2222222-2222-2222-2222-222222222222', 2, 4, 'available', '11111111-1111-1111-1111-111111111111', 300, 100),
+  ('t3333333-3333-3333-3333-333333333333', 3, 6, 'available', '11111111-1111-1111-1111-111111111111', 100, 300),
+  ('t4444444-4444-4444-4444-444444444444', 4, 2, 'available', '11111111-1111-1111-1111-111111111111', 300, 300)
+ON CONFLICT DO NOTHING;
+
+-- Insert demo suppliers
+INSERT INTO suppliers (id, name, contact_name, phone, email, restaurant_id)
+VALUES 
+    ('s1111111-1111-1111-1111-111111111111', 'Et Tedarikçisi A.Ş.', 'Ahmet Yılmaz', '+90 555 111 2222', 'ahmet@etsaglayici.com', '11111111-1111-1111-1111-111111111111'),
+    ('s2222222-2222-2222-2222-222222222222', 'Sebze Meyve Ltd.', 'Mehmet Demir', '+90 555 333 4444', 'mehmet@sebzemeyve.com', '11111111-1111-1111-1111-111111111111')
 ON CONFLICT DO NOTHING;
