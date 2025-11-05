@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
-import { v4 as uuidv4 } from "uuid"
+import { generateId } from "@/lib/demo-mode"
 import type { Table } from "@/lib/types"
 
 interface TableContextType {
@@ -123,7 +123,7 @@ export function TableProvider({ children }: { children: React.ReactNode }) {
 
   const addTable = (number: string, capacity: number, section: string) => {
     const newTable: Table = {
-      id: uuidv4(),
+      id: generateId('table'),
       number,
       capacity,
       status: "Müsait",

@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
-import { v4 as uuidv4 } from "uuid"
+import { generateId } from "@/lib/demo-mode"
 
 // Notification type definition
 export interface Notification {
@@ -89,7 +89,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const addNotification = (notification: Omit<Notification, "id" | "read" | "timestamp">) => {
     const newNotification: Notification = {
       ...notification,
-      id: uuidv4(),
+      id: generateId('notification'),
       read: false,
       timestamp: new Date(),
     }

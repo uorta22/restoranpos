@@ -5,11 +5,12 @@ export interface FoodItem {
   price: number
   image?: string
   category: string // This will store the category NAME
+  category_id?: string // Category ID for relations
   available: boolean
   type: "Et" | "Vejeteryan"
   discount?: number
   stock?: number
-  // restaurant_id?: string; // Consider adding this if not already present and needed
+  restaurant_id?: string
 }
 
 export interface CartItem {
@@ -57,7 +58,9 @@ export interface Order {
   servedAt?: Date
   completedAt?: Date
   priority: OrderPriority
-  // restaurant_id?: string;
+  isDelivery?: boolean
+  deliveryStatus?: "Beklemede" | "Yolda" | "Teslim Edildi"
+  restaurant_id?: string
 }
 
 export interface User {

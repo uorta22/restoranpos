@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
-import { v4 as uuidv4 } from "uuid"
+import { generateId } from "@/lib/demo-mode"
 import type { FoodItem, CartItem } from "@/lib/types"
 
 interface CartContextType {
@@ -81,7 +81,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return updatedItems
       } else {
         // Add new item
-        return [...prevItems, { id: uuidv4(), foodItem, quantity, notes }]
+        return [...prevItems, { id: generateId('cart'), foodItem, quantity, notes }]
       }
     })
   }

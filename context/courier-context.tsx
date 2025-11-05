@@ -3,7 +3,7 @@
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
 import type { Courier } from "@/lib/types"
-import { v4 as uuidv4 } from "uuid"
+import { generateId } from "@/lib/demo-mode"
 
 interface CourierContextType {
   couriers: Courier[]
@@ -117,7 +117,7 @@ export const CourierProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const addCourier = (courier: Omit<Courier, "id" | "totalDeliveries" | "activeFrom">) => {
     const newCourier: Courier = {
       ...courier,
-      id: uuidv4(),
+      id: generateId('courier'),
       totalDeliveries: 0,
       activeFrom: new Date(),
     }
