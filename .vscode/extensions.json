@@ -1,0 +1,15 @@
+{
+  "recommendations": [
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "bradlc.vscode-tailwindcss",
+    "amodio.toggle-excluded-files",
+    "ms-vscode.vscode-typescript-next",
+    "usernamehw.errorlens",
+    "christian-kohler.path-intellisense",
+    "formulahendry.auto-rename-tag",
+    "dsznajder.es7-react-js-snippets",
+    "pflannery.vscode-versionlens",
+    "pranaygp.vscode-css-peek"
+  ]
+}
