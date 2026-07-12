@@ -1,6 +1,5 @@
 "use client"
 
-import { useState } from "react"
 import { useTableContext } from "@/context/table-context"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -12,8 +11,6 @@ interface TableSelectorProps {
 
 export function TableSelector({ onTableSelect }: TableSelectorProps) {
   const { tables } = useTableContext()
-  const [activeTab, setActiveTab] = useState("main")
-
   // Masa bölümlerini al
   const mainTables = tables.filter((table) => table.section === "Ana Salon")
   const barTables = tables.filter((table) => table.section === "Bar")
@@ -25,7 +22,7 @@ export function TableSelector({ onTableSelect }: TableSelectorProps) {
   }
 
   return (
-    <Tabs defaultValue="main" onValueChange={setActiveTab}>
+    <Tabs defaultValue="main">
       <TabsList className="grid grid-cols-3 mb-4">
         <TabsTrigger value="main">Ana Salon</TabsTrigger>
         <TabsTrigger value="bar">Bar</TabsTrigger>

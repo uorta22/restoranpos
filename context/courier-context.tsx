@@ -1,254 +1,179 @@
 "use client"
 
-import type React from "react"
-import { createContext, useContext, useState, useEffect } from "react"
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
+import { couriersApi, membersApi, ordersApi } from "@/lib/api"
+import { getClientSupabaseInstance } from "@/lib/supabase"
 import type { Courier } from "@/lib/types"
-import { v4 as uuidv4 } from "uuid"
+import { useAuth } from "@/context/auth-context"
+
+interface NewCourierInput extends Omit<Courier, "id" | "totalDeliveries" | "activeFrom"> {
+  email: string
+}
 
 interface CourierContextType {
   couriers: Courier[]
+  isLoading: boolean
   getAvailableCouriers: () => Courier[]
   getCourierById: (id: string) => Courier | undefined
-  assignOrderToCourier: (courierId: string, orderId: string) => void
-  updateCourierStatus: (courierId: string, status: Courier["status"], orderId?: string) => void
-  updateCourierLocation: (courierId: string, lat: number, lng: number) => void
-  addCourier: (courier: Omit<Courier, "id" | "totalDeliveries" | "activeFrom">) => void
-  updateCourier: (id: string, courierData: Partial<Courier>) => void
-  removeCourier: (id: string) => void
-  completeDelivery: (courierId: string) => void
-  startLiveTracking: (courierId: string, orderId: string) => void
+  assignOrderToCourier: (courierId: string, orderId: string) => Promise<void>
+  updateCourierStatus: (courierId: string, status: Courier["status"], orderId?: string) => Promise<void>
+  updateCourierLocation: (courierId: string, lat: number, lng: number) => Promise<void>
+  addCourier: (courier: NewCourierInput) => Promise<string>
+  updateCourier: (id: string, courierData: Partial<Courier>) => Promise<void>
+  removeCourier: (id: string) => Promise<void>
+  completeDelivery: (courierId: string) => Promise<void>
+  startLiveTracking: (courierId: string, orderId: string) => Promise<boolean>
   stopLiveTracking: (courierId: string) => void
   isLiveTracking: (courierId: string) => boolean
+  refreshCouriers: () => Promise<void>
 }
 
 const CourierContext = createContext<CourierContextType | undefined>(undefined)
 
-// İstanbul'da gerçekçi konumlar (Taksim merkez)
-const DEMO_LOCATIONS = {
-  center: { lat: 41.0082, lng: 28.9784 }, // Taksim Meydanı
-}
+export function CourierProvider({ children }: { children: ReactNode }) {
+  const { user, isLoading: isAuthLoading } = useAuth()
+  const [couriers, setCouriers] = useState<Courier[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [locationWatchers, setLocationWatchers] = useState<Record<string, number>>({})
 
-export const CourierProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [couriers, setCouriers] = useState<Courier[]>([]) // Boş array ile başla
-  const [liveTrackingCouriers, setLiveTrackingCouriers] = useState<Record<string, NodeJS.Timeout>>({})
-
-  // LocalStorage'dan kurye verilerini yükle
-  useEffect(() => {
-    const savedCouriers = localStorage.getItem("restaurant-couriers")
-    if (savedCouriers) {
-      try {
-        const parsedCouriers = JSON.parse(savedCouriers)
-        // Date nesnelerini dönüştür
-        const couriersWithDates = parsedCouriers.map((courier: any) => ({
-          ...courier,
-          activeFrom: new Date(courier.activeFrom),
-        }))
-        setCouriers(couriersWithDates)
-      } catch (error) {
-        console.error("Failed to parse couriers from localStorage:", error)
-        setCouriers([]) // Hata durumunda boş array
-      }
+  const refreshCouriers = useCallback(async () => {
+    if (!user?.restaurant_id) {
+      setCouriers([])
+      setIsLoading(false)
+      return
     }
-  }, [])
+    setIsLoading(true)
+    try {
+      setCouriers(await couriersApi.getAll())
+    } finally {
+      setIsLoading(false)
+    }
+  }, [user?.restaurant_id])
 
-  // Kurye verilerini LocalStorage'a kaydet
   useEffect(() => {
-    localStorage.setItem("restaurant-couriers", JSON.stringify(couriers))
-  }, [couriers])
+    if (isAuthLoading) return
+    const timeoutId = window.setTimeout(() => void refreshCouriers(), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [isAuthLoading, refreshCouriers])
 
-  // Component unmount olduğunda tüm interval'ları temizle
+  useEffect(() => {
+    if (!user?.restaurant_id) return
+    const supabase = getClientSupabaseInstance()
+    const channel = supabase
+      .channel(`couriers:${user.restaurant_id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "deliveries", filter: `restaurant_id=eq.${user.restaurant_id}` },
+        () => void refreshCouriers(),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "courier_profiles",
+          filter: `restaurant_id=eq.${user.restaurant_id}`,
+        },
+        () => void refreshCouriers(),
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [refreshCouriers, user?.restaurant_id])
+
   useEffect(() => {
     return () => {
-      Object.values(liveTrackingCouriers).forEach((intervalId) => {
-        clearInterval(intervalId)
-      })
+      if (!("geolocation" in navigator)) return
+      Object.values(locationWatchers).forEach((watchId) => navigator.geolocation.clearWatch(watchId))
     }
-  }, [liveTrackingCouriers])
+  }, [locationWatchers])
 
-  const getAvailableCouriers = () => {
-    return couriers.filter((courier) => courier.status === "Müsait")
+  const getAvailableCouriers = () => couriers.filter((courier) => courier.status === "Müsait")
+  const getCourierById = (id: string) => couriers.find((courier) => courier.id === id)
+
+  const assignOrderToCourier = async (courierId: string, orderId: string) => {
+    await couriersApi.assignOrder(courierId, orderId)
+    await refreshCouriers()
   }
 
-  const getCourierById = (id: string) => {
-    return couriers.find((courier) => courier.id === id)
-  }
-
-  const assignOrderToCourier = (courierId: string, orderId: string) => {
-    setCouriers((prevCouriers) =>
-      prevCouriers.map((courier) =>
-        courier.id === courierId
-          ? {
-              ...courier,
-              status: "Siparişte",
-              currentOrderId: orderId,
-            }
-          : courier,
-      ),
-    )
-  }
-
-  const updateCourierStatus = (courierId: string, status: Courier["status"], orderId?: string) => {
-    setCouriers((prevCouriers) =>
-      prevCouriers.map((courier) =>
-        courier.id === courierId
-          ? {
-              ...courier,
-              status,
-              currentOrderId: orderId || (status === "Müsait" ? undefined : courier.currentOrderId),
-            }
-          : courier,
-      ),
-    )
-  }
-
-  const updateCourierLocation = (courierId: string, lat: number, lng: number) => {
-    setCouriers((prevCouriers) =>
-      prevCouriers.map((courier) =>
-        courier.id === courierId
-          ? {
-              ...courier,
-              location: { lat, lng },
-            }
-          : courier,
-      ),
-    )
-  }
-
-  const addCourier = (courier: Omit<Courier, "id" | "totalDeliveries" | "activeFrom">) => {
-    const newCourier: Courier = {
-      ...courier,
-      id: uuidv4(),
-      totalDeliveries: 0,
-      activeFrom: new Date(),
-    }
-    setCouriers((prevCouriers) => [...prevCouriers, newCourier])
-  }
-
-  const updateCourier = (id: string, courierData: Partial<Courier>) => {
-    setCouriers((prevCouriers) =>
-      prevCouriers.map((courier) =>
-        courier.id === id
-          ? {
-              ...courier,
-              ...courierData,
-            }
-          : courier,
-      ),
-    )
-  }
-
-  const removeCourier = (id: string) => {
-    // Eğer kurye aktif bir teslimat yapıyorsa silmeyi engelle
-    const courier = getCourierById(id)
-    if (courier && courier.status !== "Müsait") {
-      throw new Error("Aktif teslimat yapan kurye silinemez")
-    }
-
-    // Canlı takip varsa durdur
-    if (liveTrackingCouriers[id]) {
-      clearInterval(liveTrackingCouriers[id])
-      setLiveTrackingCouriers((prev) => {
-        const newTracking = { ...prev }
-        delete newTracking[id]
-        return newTracking
-      })
-    }
-
-    setCouriers((prevCouriers) => prevCouriers.filter((courier) => courier.id !== id))
-  }
-
-  const completeDelivery = (courierId: string) => {
-    setCouriers((prevCouriers) =>
-      prevCouriers.map((courier) =>
-        courier.id === courierId
-          ? {
-              ...courier,
-              status: "Müsait",
-              currentOrderId: undefined,
-              totalDeliveries: courier.totalDeliveries + 1,
-            }
-          : courier,
-      ),
-    )
-
-    // Canlı takibi durdur
-    stopLiveTracking(courierId)
-  }
-
-  // Canlı takip başlatma
-  const startLiveTracking = (courierId: string, orderId: string) => {
-    // Önceki takibi durdur
-    if (liveTrackingCouriers[courierId]) {
-      clearInterval(liveTrackingCouriers[courierId])
-    }
-
+  const updateCourierStatus = async (courierId: string, status: Courier["status"], orderId?: string) => {
     const courier = getCourierById(courierId)
-    if (!courier) return
-
-    // Başlangıç konumu
-    const startLocation = courier.location || DEMO_LOCATIONS.center
-
-    // Hedef konumu (müşteri konumu)
-    // Gerçek uygulamada bu sipariş veritabanından alınır
-    const targetLat = startLocation.lat + Math.random() * 0.01
-    const targetLng = startLocation.lng + Math.random() * 0.01
-
-    // Toplam adım sayısı ve mevcut adım
-    const totalSteps = 20
-    let currentStep = 0
-
-    // Kurye konumunu rastgele güncelle (gerçek uygulamada GPS verisi kullanılır)
-    const intervalId = setInterval(() => {
-      currentStep++
-
-      if (currentStep >= totalSteps) {
-        // Hedefe ulaşıldı, takibi durdur
-        clearInterval(liveTrackingCouriers[courierId])
-        return
-      }
-
-      // İlerleme oranı (0-1 arası)
-      const progress = currentStep / totalSteps
-
-      // Doğrusal interpolasyon ile yeni konum hesapla
-      const newLat = startLocation.lat + (targetLat - startLocation.lat) * progress
-      const newLng = startLocation.lng + (targetLng - startLocation.lng) * progress
-
-      // Biraz rastgelelik ekle (gerçekçi hareket için)
-      const jitter = 0.0002
-      const finalLat = newLat + (Math.random() - 0.5) * jitter
-      const finalLng = newLng + (Math.random() - 0.5) * jitter
-
-      updateCourierLocation(courierId, finalLat, finalLng)
-    }, 3000) // 3 saniyede bir güncelle
-
-    setLiveTrackingCouriers((prev) => ({
-      ...prev,
-      [courierId]: intervalId,
-    }))
+    const targetOrderId = orderId || courier?.currentOrderId
+    if (!targetOrderId) return
+    if (status === "Teslimatta") await ordersApi.updateDeliveryStatus(targetOrderId, "Yolda")
+    if (status === "Müsait") await couriersApi.completeDelivery(targetOrderId)
+    await refreshCouriers()
   }
 
-  // Canlı takibi durdurma
+  const updateCourierLocation = async (courierId: string, lat: number, lng: number) => {
+    const courier = getCourierById(courierId)
+    if (!courier?.currentOrderId) throw new Error("Kuryenin aktif teslimatı bulunamadı")
+    await couriersApi.updateLocation(courier.currentOrderId, lat, lng)
+    setCouriers((current) =>
+      current.map((item) => (item.id === courierId ? { ...item, location: { lat, lng } } : item)),
+    )
+  }
+
+  const addCourier = async (courier: NewCourierInput) => {
+    return couriersApi.createInvitation(courier)
+  }
+
+  const updateCourier = async (id: string, courierData: Partial<Courier>) => {
+    await couriersApi.updateProfile(id, courierData)
+    await refreshCouriers()
+  }
+
+  const removeCourier = async (id: string) => {
+    const courier = getCourierById(id)
+    if (courier && courier.status !== "Müsait") throw new Error("Aktif teslimat yapan kurye silinemez")
+    stopLiveTracking(id)
+    await membersApi.remove(id)
+    setCouriers((current) => current.filter((courierItem) => courierItem.id !== id))
+  }
+
+  const completeDelivery = async (courierId: string) => {
+    const courier = getCourierById(courierId)
+    if (!courier?.currentOrderId) throw new Error("Kuryenin aktif teslimatı bulunamadı")
+    await couriersApi.completeDelivery(courier.currentOrderId)
+    stopLiveTracking(courierId)
+    await refreshCouriers()
+  }
+
+  const startLiveTracking = async (courierId: string, orderId: string) => {
+    if (courierId !== user?.id || user.memberRole !== "courier" || !("geolocation" in navigator)) return false
+    stopLiveTracking(courierId)
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        void couriersApi.updateLocation(orderId, position.coords.latitude, position.coords.longitude)
+      },
+      () => stopLiveTracking(courierId),
+      { enableHighAccuracy: true, maximumAge: 10_000, timeout: 20_000 },
+    )
+    setLocationWatchers((current) => ({ ...current, [courierId]: watchId }))
+    return true
+  }
+
   const stopLiveTracking = (courierId: string) => {
-    if (liveTrackingCouriers[courierId]) {
-      clearInterval(liveTrackingCouriers[courierId])
-      setLiveTrackingCouriers((prev) => {
-        const newTracking = { ...prev }
-        delete newTracking[courierId]
-        return newTracking
-      })
-    }
+    const watchId = locationWatchers[courierId]
+    if (watchId === undefined || !("geolocation" in navigator)) return
+    navigator.geolocation.clearWatch(watchId)
+    setLocationWatchers((current) => {
+      const next = { ...current }
+      delete next[courierId]
+      return next
+    })
   }
 
-  // Kurye canlı takip ediliyor mu?
-  const isLiveTracking = (courierId: string) => {
-    return !!liveTrackingCouriers[courierId]
-  }
+  const isLiveTracking = (courierId: string) => locationWatchers[courierId] !== undefined
 
   return (
     <CourierContext.Provider
       value={{
         couriers,
+        isLoading,
         getAvailableCouriers,
         getCourierById,
         assignOrderToCourier,
@@ -261,6 +186,7 @@ export const CourierProvider: React.FC<{ children: React.ReactNode }> = ({ child
         startLiveTracking,
         stopLiveTracking,
         isLiveTracking,
+        refreshCouriers,
       }}
     >
       {children}
@@ -268,10 +194,8 @@ export const CourierProvider: React.FC<{ children: React.ReactNode }> = ({ child
   )
 }
 
-export const useCourierContext = () => {
+export function useCourierContext() {
   const context = useContext(CourierContext)
-  if (context === undefined) {
-    throw new Error("useCourierContext must be used within a CourierProvider")
-  }
+  if (context === undefined) throw new Error("useCourierContext must be used within a CourierProvider")
   return context
 }

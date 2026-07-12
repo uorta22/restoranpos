@@ -1,6 +1,6 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
-import type { FoodItem } from "./types"
+import type { CartItem, FoodItem } from "./types"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -19,13 +19,42 @@ export function getDiscountedPrice(item: FoodItem): number {
   return item.price - (item.price * item.discount) / 100
 }
 
+function roundCurrency(amount: number) {
+  return Math.round((amount + Number.EPSILON) * 100) / 100
+}
+
+export function calculateOrderTotals(items: CartItem[], taxRate: number) {
+  let subtotal = 0
+  let discount = 0
+
+  for (const item of items) {
+    const lineSubtotal = roundCurrency(item.foodItem.price * item.quantity)
+    const lineDiscount = roundCurrency(lineSubtotal * (item.foodItem.discount ?? 0) / 100)
+    subtotal += lineSubtotal
+    discount += lineDiscount
+  }
+
+  subtotal = roundCurrency(subtotal)
+  discount = roundCurrency(discount)
+  const netSubtotal = roundCurrency(subtotal - discount)
+  const tax = roundCurrency(netSubtotal * taxRate / 100)
+
+  return {
+    subtotal,
+    discount,
+    netSubtotal,
+    tax,
+    total: roundCurrency(netSubtotal + tax),
+  }
+}
+
 export function validateEmail(email: string): boolean {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   return emailRegex.test(email)
 }
 
 export function validatePassword(password: string): boolean {
-  return password.length >= 6
+  return password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /\d/.test(password)
 }
 
 export function formatDate(date: Date): string {
@@ -66,46 +95,4 @@ export function formatDateTime(date: Date | string | number | null | undefined):
     console.error("Tarih formatlanırken hata oluştu:", error)
     return "-"
   }
-}
-
-// Sipariş numarası oluşturma fonksiyonu
-let lastOrderNumber = 0
-
-export function generateOrderNumber(): string {
-  // LocalStorage'dan son sipariş numarasını al
-  if (typeof window !== "undefined" && lastOrderNumber === 0) {
-    const storedLastNumber = localStorage.getItem("lastOrderNumber")
-    if (storedLastNumber) {
-      lastOrderNumber = Number.parseInt(storedLastNumber, 10)
-    } else {
-      // İlk sipariş numarası
-      lastOrderNumber = 1000000000
-    }
-  } else if (lastOrderNumber === 0) {
-    // Server-side rendering için başlangıç değeri
-    lastOrderNumber = 1000000000
-  }
-
-  // Bir sonraki sipariş numarası
-  lastOrderNumber++
-
-  // LocalStorage'a kaydet
-  if (typeof window !== "undefined") {
-    localStorage.setItem("lastOrderNumber", lastOrderNumber.toString())
-  }
-
-  // 10 haneli numara olarak döndür
-  return lastOrderNumber.toString()
-}
-
-// OTP (One-Time Password) oluşturma fonksiyonu
-export function generateOTP(length = 6): string {
-  const digits = "0123456789"
-  let otp = ""
-
-  for (let i = 0; i < length; i++) {
-    otp += digits[Math.floor(Math.random() * 10)]
-  }
-
-  return otp
 }

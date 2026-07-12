@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,95 +10,46 @@ import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useTableContext } from "@/context/table-context"
+import type { Reservation } from "@/lib/types"
 
-interface Reservation {
-  id: string
-  customerName: string
-  date: Date
+interface ReservationFormValue extends Omit<Reservation, "tableNumber"> {
   time: string
-  people: number
   tableNumber: string
-  phone: string
-  notes?: string
-  status: "Beklemede" | "Onaylandı" | "İptal Edildi"
+  notes: string
 }
 
 interface ReservationFormProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  initialData?: Reservation
-  onSave: (reservation: Reservation) => void
+  initialData?: ReservationFormValue
+  onSave: (reservation: ReservationFormValue) => void
 }
 
 export function ReservationForm({ open, onOpenChange, initialData, onSave }: ReservationFormProps) {
   const { toast } = useToast()
-  const { tables, getAvailableTables } = useTableContext()
-  const isEditing = !!initialData
+  const { tables } = useTableContext()
+  const isEditing = Boolean(initialData?.id)
 
-  const [formData, setFormData] = useState<Reservation>({
-    id: "",
-    customerName: "",
-    date: new Date(),
-    time: "19:00",
-    people: 2,
-    tableNumber: "",
-    phone: "",
-    notes: "",
-    status: "Beklemede",
-  })
+  const [formData, setFormData] = useState<ReservationFormValue>(() =>
+    initialData ?? {
+      id: "",
+      customerName: "",
+      date: new Date(),
+      time: "19:00",
+      people: 2,
+      tableNumber: "",
+      phone: "",
+      notes: "",
+      status: "Beklemede",
+    },
+  )
 
-  const [availableTables, setAvailableTables] = useState<{ id: string; number: string; capacity: number }[]>([])
-
-  // Düzenleme durumunda mevcut verileri yükle
-  useEffect(() => {
-    if (initialData && open) {
-      // Tarih ve saat ayrıştırma
-      const date = new Date(initialData.date)
-      const hours = date.getHours().toString().padStart(2, "0")
-      const minutes = date.getMinutes().toString().padStart(2, "0")
-      const time = `${hours}:${minutes}`
-
-      setFormData({
-        ...initialData,
-        time,
-        date: new Date(date.setHours(0, 0, 0, 0)), // Sadece tarih kısmını al
-      })
-    } else if (!initialData && open) {
-      // Yeni rezervasyon için varsayılan değerler
-      setFormData({
-        id: Math.random().toString(36).substring(2, 9),
-        customerName: "",
-        date: new Date(),
-        time: "19:00",
-        people: 2,
-        tableNumber: "",
-        phone: "",
-        notes: "",
-        status: "Beklemede",
-      })
-    }
-
-    // Müsait masaları getir
-    if (open) {
-      const available = getAvailableTables()
-
-      // Eğer düzenleme modundaysak ve seçili masa varsa, o masayı da listeye ekle
-      if (isEditing && initialData?.tableNumber) {
-        const selectedTable = tables.find((table) => table.number === initialData.tableNumber)
-        if (selectedTable && !available.some((table) => table.id === selectedTable.id)) {
-          available.push(selectedTable)
-        }
-      }
-
-      setAvailableTables(
-        available.map((table) => ({
-          id: table.id,
-          number: table.number,
-          capacity: table.capacity,
-        })),
-      )
-    }
-  }, [initialData, open, getAvailableTables, isEditing, tables])
+  const available = tables.filter((table) => table.status === "Müsait")
+  const selected = initialData?.tableNumber
+    ? tables.find((table) => table.number === initialData.tableNumber)
+    : undefined
+  const tableChoices = selected && !available.some((table) => table.id === selected.id) ? [...available, selected] : available
+  const availableTables = tableChoices.map((table) => ({ id: table.id, number: table.number, capacity: table.capacity }))
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target

@@ -4,9 +4,8 @@ export interface GoogleMapsConfig {
   libraries: string[]
 }
 
-// Google Maps API key'ini güncelleyelim
 export const GOOGLE_MAPS_CONFIG: GoogleMapsConfig = {
-  apiKey: "AIzaSyBBbRndxi4HvAI51BP9-pMyrVwzSS8QspU",
+  apiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
   libraries: ["places", "geometry"],
 }
 
@@ -14,18 +13,6 @@ export interface Location {
   lat: number
   lng: number
   address?: string
-}
-
-export interface RouteInfo {
-  distance: string
-  duration: string
-  steps: google.maps.DirectionsStep[]
-}
-
-declare global {
-  interface Window {
-    google: any
-  }
 }
 
 // Haversine formula ile mesafe hesaplama (Google Maps olmadan da çalışır)

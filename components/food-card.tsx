@@ -6,6 +6,7 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { useCart } from "@/context/cart-context"
 import { useToast } from "@/hooks/use-toast"
+import { ProductImage } from "@/components/product-image"
 
 interface FoodCardProps {
   food: FoodItem
@@ -29,7 +30,7 @@ export function FoodCard({ food }: FoodCardProps) {
     <Card>
       <CardContent className="p-3">
         <div className="aspect-w-4 aspect-h-3 mb-3 overflow-hidden rounded-md">
-          <img
+          <ProductImage
             src={food.image || "/placeholder.svg?height=160&width=320"}
             alt={food.title}
             className="object-cover w-full h-full"

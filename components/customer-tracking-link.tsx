@@ -9,23 +9,28 @@ import { useToast } from "@/hooks/use-toast"
 import { useRouter } from "next/navigation"
 import { MapPin } from "lucide-react"
 
-export function CustomerTrackingLink() {
+export function CustomerTrackingLink({ trackingToken }: { trackingToken?: string }) {
   const [isOpen, setIsOpen] = useState(false)
-  const [orderId, setOrderId] = useState("")
+  const [orderId, setOrderId] = useState(trackingToken ?? "")
   const { toast } = useToast()
   const router = useRouter()
 
   const handleTrack = () => {
     if (!orderId.trim()) {
       toast({
-        title: "Sipariş numarası gerekli",
-        description: "Lütfen sipariş numaranızı girin",
+        title: "Takip kodu gerekli",
+        description: "Lütfen güvenli takip kodunu girin",
         variant: "destructive",
       })
       return
     }
 
-    router.push(`/track/${orderId}`)
+    if (!/^[0-9a-f-]{36}$/i.test(orderId.trim())) {
+      toast({ title: "Geçersiz takip kodu", description: "Takip kodunu kontrol edin.", variant: "destructive" })
+      return
+    }
+
+    router.push(`/track/${encodeURIComponent(orderId.trim())}`)
     setIsOpen(false)
   }
 
@@ -33,7 +38,7 @@ export function CustomerTrackingLink() {
     <>
       <Button variant="outline" onClick={() => setIsOpen(true)}>
         <MapPin className="mr-2 h-4 w-4" />
-        Siparişimi Takip Et
+        Teslimatı Takip Et
       </Button>
 
       <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -43,15 +48,16 @@ export function CustomerTrackingLink() {
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="orderId">Sipariş Numarası</Label>
+              <Label htmlFor="orderId">Takip Kodu</Label>
               <Input
                 id="orderId"
                 value={orderId}
                 onChange={(e) => setOrderId(e.target.value)}
-                placeholder="Sipariş numaranızı girin"
+                placeholder="Takip kodunu girin"
+                readOnly={Boolean(trackingToken)}
               />
               <p className="text-sm text-gray-500">
-                Sipariş numaranız, sipariş onay mesajında veya e-postanızda bulunmaktadır.
+                Takip kodu, restoranın sizinle paylaştığı güvenli bağlantıda bulunur.
               </p>
             </div>
           </div>

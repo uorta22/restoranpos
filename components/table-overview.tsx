@@ -8,15 +8,15 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { formatCurrency } from "@/lib/utils"
-import type { Order } from "@/lib/types"
+import type { Order, Table } from "@/lib/types"
 import { Coffee, Users, CreditCard, Banknote } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 
 export function TableOverview() {
-  const { tables, updateTableStatus } = useTableContext()
-  const { orders, getOrderById, updateOrderStatus, updatePaymentStatus } = useOrderContext()
+  const { tables } = useTableContext()
+  const { orders, updatePaymentStatus } = useOrderContext()
   const { toast } = useToast()
-  const [selectedTable, setSelectedTable] = useState<any>(null)
+  const [selectedTable, setSelectedTable] = useState<Table | null>(null)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [isPaymentCompleted, setIsPaymentCompleted] = useState(false)
@@ -51,7 +51,7 @@ export function TableOverview() {
   }
 
   // Masaya tıklandığında
-  const handleTableClick = (table: any) => {
+  const handleTableClick = (table: Table) => {
     if (table.status === "Dolu") {
       setSelectedTable(table)
       const order = findTableOrder(table.id)
@@ -80,10 +80,10 @@ export function TableOverview() {
   }
 
   // Ödeme alma işlemi
-  const handleCompletePayment = (method: "Nakit" | "Kredi Kartı" | "Yemek Param") => {
+  const handleCompletePayment = async (method: "Nakit" | "Kredi Kartı" | "Yemek Param") => {
     if (selectedOrder && selectedTable) {
       // Ödeme yöntemini belirle
-      let paymentInfo = method
+      let paymentInfo: string = method
 
       // Eğer Yemek Param seçildiyse ve bir kart seçildiyse, kart bilgisini ekle
       if (method === "Yemek Param" && selectedMealCard) {
@@ -91,14 +91,8 @@ export function TableOverview() {
         paymentInfo = `${method} - ${mealCardName}`
       }
 
-      // Siparişi tamamlandı olarak işaretle
-      updateOrderStatus(selectedOrder.id, "Tamamlandı")
-
-      // Ödeme durumunu güncelle
-      updatePaymentStatus(selectedOrder.id, "Ödendi", paymentInfo)
-
-      // Masa durumunu müsait olarak güncelle
-      updateTableStatus(selectedTable.id, "Müsait")
+      const completed = await updatePaymentStatus(selectedOrder.id, "Ödendi", paymentInfo)
+      if (!completed) return
 
       // Ödeme tamamlandı durumunu güncelle
       setIsPaymentCompleted(true)
@@ -378,7 +372,7 @@ export function TableOverview() {
                   setTimeout(() => handleCompletePayment("Yemek Param"), 100)
                 }}
               >
-                <img src={card.logo || "/placeholder.svg"} alt={card.name} className="h-10 object-contain" />
+                <CreditCard className="h-6 w-6" aria-hidden="true" />
                 <span>{card.name}</span>
               </Button>
             ))}

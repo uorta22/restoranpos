@@ -66,15 +66,6 @@ export default function HomePage() {
         setCategories(allCategories)
         setHasProducts(fetchedProducts.length > 0)
 
-        if (allCategories.length > 1 && selectedCategory === "Tümü") {
-          // if more than just "Tümü"
-          // setSelectedCategory("Tümü"); // Already default
-        } else if (allCategories.length === 1 && allCategories[0] === "Tümü" && fetchedProducts.length === 0) {
-          // Only "Tümü" and no products, keep "Tümü"
-        } else if (allCategories.length > 1) {
-          // If "Tümü" is not the only option, ensure it's selected if no specific category is chosen
-          // This logic might need refinement based on desired default behavior
-        }
       } catch (error) {
         console.error("Failed to load data:", error)
         setCategories(["Tümü"]) // Default to "Tümü" on error

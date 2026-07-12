@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
@@ -10,7 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { useCart } from "@/context/cart-context"
 import { useOrderContext } from "@/context/order-context"
 import { useTableContext } from "@/context/table-context"
-import { formatCurrency, getDiscountedPrice } from "@/lib/utils"
+import { calculateOrderTotals, formatCurrency, getDiscountedPrice } from "@/lib/utils"
+import { useRestaurantTaxRate } from "@/hooks/use-restaurant-tax-rate"
 import {
   ShoppingCart,
   Trash2,
@@ -33,7 +34,6 @@ import { TableSelector } from "@/components/table-selector"
 export function Cart() {
   const {
     items,
-    removeItem,
     updateQuantity,
     clearCart,
     totalItems,
@@ -46,6 +46,7 @@ export function Cart() {
   const { createOrder } = useOrderContext()
   const { assignOrderToTable, tables } = useTableContext()
   const { toast } = useToast()
+  const taxRate = useRestaurantTaxRate()
   const [orderNotes, setOrderNotes] = useState("")
   const [isOrderTypeDialogOpen, setIsOrderTypeDialogOpen] = useState(false)
   const [isOrderSummaryDialogOpen, setIsOrderSummaryDialogOpen] = useState(false)
@@ -58,15 +59,16 @@ export function Cart() {
   const [selectedOrderType, setSelectedOrderType] = useState<"Restoranda" | "Gel-Al" | "Paket Servis" | null>(null)
   const [selectedMealCard, setSelectedMealCard] = useState<string | null>(null)
   const [isMealCardDialogOpen, setIsMealCardDialogOpen] = useState(false)
+  const orderTotals = calculateOrderTotals(items, taxRate)
 
-  const mealCardOptions = [
+  const mealCardOptions = useMemo(() => [
     { id: "sodexo", name: "Sodexo", logo: "/images/sodexo-logo.png" },
     { id: "multinet", name: "Multinet", logo: "/images/multinet-logo.png" },
     { id: "ticket", name: "Ticket Restaurant", logo: "/images/ticket-logo.png" },
     { id: "setcard", name: "SetCard", logo: "/images/setcard-logo.png" },
     { id: "metropol", name: "MetropolCard", logo: "/images/metropol-logo.png" },
     { id: "paye", name: "Paye Kart", logo: "/images/paye-logo.png" },
-  ]
+  ], [])
 
   const handleOpenOrderTypeDialog = () => {
     if (items.length === 0) {
@@ -114,8 +116,15 @@ export function Cart() {
       }
 
       // SADECE sipariş oluştururken masa bilgisini set et, öncesinde değil
-      createOrder(items, selectedTable.number, customerName || "Misafir", orderNotes, selectedTableId)
-        .then((order) => {
+      createOrder({
+        items,
+        total: totalPrice,
+        tableName: selectedTable.number,
+        customerName: customerName || "Misafir",
+        notes: orderNotes,
+        tableId: selectedTableId,
+      })
+        .then(async (order) => {
           if (!order) {
             toast({
               title: "Hata",
@@ -126,7 +135,7 @@ export function Cart() {
           }
 
           // Assign order to table
-          assignOrderToTable(selectedTableId, order.id)
+          await assignOrderToTable(selectedTableId, order.id)
 
           // Şimdi masa bilgisini set et
           setTableInfo(selectedTableId, selectedTable.number, customerName || "Misafir")
@@ -146,7 +155,7 @@ export function Cart() {
             description: "Siparişiniz başarıyla oluşturuldu ve adisyon başlatıldı",
           })
         })
-        .catch((error) => {
+        .catch(() => {
           toast({
             title: "Hata",
             description: "Sipariş oluşturulurken bir hata oluştu",
@@ -158,6 +167,14 @@ export function Cart() {
 
   // Update the handleCreateOrder function to handle all order types
   const handleCreateOrder = useCallback(() => {
+    if (!paymentMethod || (paymentMethod === "Yemek Param" && !selectedMealCard)) {
+      toast({
+        title: "Ödeme yöntemi gerekli",
+        description: "Gel-Al siparişi için ödeme yöntemini seçin.",
+        variant: "destructive",
+      })
+      return
+    }
     setIsProcessing(true)
     setIsOrderSummaryDialogOpen(false)
 
@@ -170,8 +187,15 @@ export function Cart() {
 
     // For restaurant orders, we need to create the order and assign it to the table
     if (selectedOrderType === "Restoranda" && tableId) {
-      createOrder(items, tableName, customerName || "Misafir", orderNotesWithPayment, tableId)
-        .then((order) => {
+      createOrder({
+        items,
+        total: totalPrice,
+        tableName: tableName || undefined,
+        customerName: customerName || "Misafir",
+        notes: orderNotesWithPayment,
+        tableId,
+      })
+        .then(async (order) => {
           if (!order) {
             toast({
               title: "Hata",
@@ -183,7 +207,7 @@ export function Cart() {
           }
 
           // Assign order to table
-          assignOrderToTable(tableId, order.id)
+          await assignOrderToTable(tableId, order.id)
 
           // Clear cart and show receipt
           clearCart()
@@ -200,7 +224,7 @@ export function Cart() {
             description: "Siparişiniz başarıyla oluşturuldu ve adisyon başlatıldı",
           })
         })
-        .catch((error) => {
+        .catch(() => {
           toast({
             title: "Hata",
             description: "Sipariş oluşturulurken bir hata oluştu",
@@ -218,15 +242,18 @@ export function Cart() {
     // For Gel-Al orders
     const orderType = selectedOrderType === "Gel-Al" ? "Gel-Al" : tableName || undefined
 
-    createOrder(
+    createOrder({
       items,
-      orderType,
-      customerName || undefined,
-      orderNotesWithPayment,
+      total: totalPrice,
+      tableName: orderType,
+      customerName: customerName || undefined,
+      notes: orderNotesWithPayment,
       tableId,
-      selectedOrderType === "Paket Servis",
-    )
-      .then((order) => {
+      isDelivery: selectedOrderType === "Paket Servis",
+      paymentMethod,
+      payNow: selectedOrderType === "Gel-Al",
+    })
+      .then(async (order) => {
         if (!order) {
           toast({
             title: "Hata",
@@ -239,7 +266,7 @@ export function Cart() {
 
         // Siparişi masaya ata
         if (tableId) {
-          assignOrderToTable(tableId, order.id)
+          await assignOrderToTable(tableId, order.id)
         }
 
         clearCart()
@@ -252,7 +279,7 @@ export function Cart() {
           description: `${selectedOrderType} siparişi başarıyla oluşturuldu`,
         })
       })
-      .catch((error) => {
+      .catch(() => {
         toast({
           title: "Hata",
           description: "Sipariş oluşturulurken bir hata oluştu",
@@ -266,6 +293,7 @@ export function Cart() {
       })
   }, [
     items,
+    totalPrice,
     orderNotes,
     tableId,
     tableName,
@@ -395,16 +423,16 @@ export function Cart() {
         <div className="w-full space-y-2">
           <div className="flex justify-between text-sm">
             <span>Ara Toplam</span>
-            <span>{formatCurrency(totalPrice)}</span>
+            <span>{formatCurrency(orderTotals.netSubtotal)}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span>KDV (%8)</span>
-            <span>{formatCurrency(totalPrice * 0.08)}</span>
+            <span>KDV (%{taxRate})</span>
+            <span>{formatCurrency(orderTotals.tax)}</span>
           </div>
           <Separator className="my-2" />
           <div className="flex justify-between font-bold">
             <span>Toplam</span>
-            <span>{formatCurrency(totalPrice * 1.08)}</span>
+            <span>{formatCurrency(orderTotals.total)}</span>
           </div>
         </div>
 
@@ -488,7 +516,7 @@ export function Cart() {
                         <span>
                           {item.quantity}x {item.foodItem.title}
                         </span>
-                        <span>{formatCurrency(item.foodItem.price * item.quantity)}</span>
+                        <span>{formatCurrency(getDiscountedPrice(item.foodItem) * item.quantity)}</span>
                       </div>
                     ))}
                   </div>
@@ -535,15 +563,15 @@ export function Cart() {
                 <div className="border-t pt-4">
                   <div className="flex justify-between text-sm">
                     <span>Ara Toplam</span>
-                    <span>{formatCurrency(totalPrice)}</span>
+                    <span>{formatCurrency(orderTotals.netSubtotal)}</span>
                   </div>
                   <div className="flex justify-between text-sm mt-1">
-                    <span>KDV (%8)</span>
-                    <span>{formatCurrency(totalPrice * 0.08)}</span>
+                    <span>KDV (%{taxRate})</span>
+                    <span>{formatCurrency(orderTotals.tax)}</span>
                   </div>
                   <div className="flex justify-between font-bold text-lg mt-2">
                     <span>Toplam Tutar</span>
-                    <span>{formatCurrency(totalPrice * 1.08)}</span>
+                    <span>{formatCurrency(orderTotals.total)}</span>
                   </div>
                 </div>
               </div>
@@ -553,7 +581,10 @@ export function Cart() {
                 <X className="mr-2 h-4 w-4" />
                 İptal
               </Button>
-              <Button onClick={handleCreateOrder} disabled={isProcessing}>
+              <Button
+                onClick={handleCreateOrder}
+                disabled={isProcessing || !paymentMethod || (paymentMethod === "Yemek Param" && !selectedMealCard)}
+              >
                 {isProcessing ? "İşleniyor..." : "Sipariş Oluştur"}
               </Button>
             </DialogFooter>
@@ -592,7 +623,7 @@ export function Cart() {
                 className="h-24 flex flex-col items-center justify-center gap-2"
                 onClick={() => handleMealCardSelect(card.id)}
               >
-                <img src={card.logo || "/placeholder.svg"} alt={card.name} className="h-10 object-contain" />
+                <CreditCard className="h-6 w-6" aria-hidden="true" />
                 <span>{card.name}</span>
               </Button>
             ))}

@@ -1,192 +1,199 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
-import { useToast } from "@/hooks/use-toast"
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
 import { ordersApi } from "@/lib/api"
-import type { Order, CartItem } from "@/lib/types"
+import { getClientSupabaseInstance } from "@/lib/supabase"
+import type { CartItem, DeliveryAddress, Order } from "@/lib/types"
+import { useAuth } from "@/context/auth-context"
+import { useToast } from "@/hooks/use-toast"
+
+interface CreateOrderInput {
+  items: CartItem[]
+  total: number
+  tableName?: string
+  customerName?: string
+  customerPhone?: string
+  notes?: string
+  tableId?: string | null
+  isDelivery?: boolean
+  deliveryAddress?: DeliveryAddress
+  paymentMethod?: string
+  payNow?: boolean
+}
 
 interface OrderContextType {
   orders: Order[]
   isLoading: boolean
   getOrderById: (id: string) => Order | undefined
   getDeliveryOrders: () => Order[]
-  createOrder: (orderData: {
-    items: CartItem[]
-    total: number
-    tableName?: string
-    customerName?: string
-    notes?: string
-    tableId?: string | null
-    isDelivery?: boolean
-    deliveryAddress?: any
-  }) => Promise<Order | null>
-  updateOrderStatus: (
+  createOrder: (orderData: CreateOrderInput) => Promise<Order | null>
+  updateOrderStatus: (orderId: string, status: Order["status"]) => Promise<boolean>
+  updatePaymentStatus: (orderId: string, status: Order["paymentStatus"], method?: string) => Promise<boolean>
+  updateDeliveryStatus: (
     orderId: string,
-    status: "Beklemede" | "Hazırlanıyor" | "Hazır" | "Tamamlandı" | "İptal Edildi",
+    status: NonNullable<Order["deliveryStatus"]>,
+    location?: { lat: number; lng: number },
   ) => Promise<boolean>
-  updatePaymentStatus: (orderId: string, status: "Beklemede" | "Ödendi", method?: string) => Promise<boolean>
-  updateDeliveryStatus: (orderId: string, status: "Beklemede" | "Yolda" | "Teslim Edildi") => Promise<boolean>
   refreshOrders: () => Promise<void>
 }
 
 const OrderContext = createContext<OrderContextType | undefined>(undefined)
 
 export function OrderProvider({ children }: { children: ReactNode }) {
+  const { user, isLoading: isAuthLoading } = useAuth()
   const [orders, setOrders] = useState<Order[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
 
-  // Load orders on mount
-  useEffect(() => {
-    loadOrders()
-  }, [])
+  const refreshOrders = useCallback(async () => {
+    if (!user?.restaurant_id) {
+      setOrders([])
+      setIsLoading(false)
+      return
+    }
 
-  const loadOrders = async () => {
+    setIsLoading(true)
     try {
-      setIsLoading(true)
-      const fetchedOrders = await ordersApi.getAll()
-      setOrders(fetchedOrders)
-    } catch (error) {
-      console.error("Failed to load orders:", error)
+      setOrders(await ordersApi.getAll())
+    } catch (cause) {
       toast({
-        title: "Hata",
-        description: "Siparişler yüklenirken bir hata oluştu.",
+        title: "Siparişler yüklenemedi",
+        description: cause instanceof Error ? cause.message : "Sipariş verileri okunamadı.",
         variant: "destructive",
       })
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [toast, user?.restaurant_id])
 
-  const getOrderById = (id: string): Order | undefined => {
-    return orders.find((order) => order.id === id)
-  }
+  useEffect(() => {
+    if (isAuthLoading) return
+    const timeoutId = window.setTimeout(() => void refreshOrders(), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [isAuthLoading, refreshOrders])
 
-  const getDeliveryOrders = (): Order[] => {
-    return orders.filter((order) => order.isDelivery === true)
-  }
+  useEffect(() => {
+    if (!user?.restaurant_id) return
+    const supabase = getClientSupabaseInstance()
+    const refresh = () => void refreshOrders()
+    const channel = supabase
+      .channel(`orders:${user.restaurant_id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "orders", filter: `restaurant_id=eq.${user.restaurant_id}` },
+        refresh,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "deliveries", filter: `restaurant_id=eq.${user.restaurant_id}` },
+        refresh,
+      )
+      .subscribe()
 
-  const createOrder = async (orderData: {
-    items: CartItem[]
-    total: number
-    tableName?: string
-    customerName?: string
-    notes?: string
-    tableId?: string | null
-    isDelivery?: boolean
-    deliveryAddress?: any
-  }): Promise<Order | null> => {
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [refreshOrders, user?.restaurant_id])
+
+  const getOrderById = (id: string) => orders.find((order) => order.id === id)
+  const getDeliveryOrders = () => orders.filter((order) => order.isDelivery)
+
+  const createOrder = async (orderData: CreateOrderInput) => {
     try {
       const newOrder = await ordersApi.create(orderData)
       if (newOrder) {
-        setOrders((prev) => [newOrder, ...prev])
+        setOrders((current) => [newOrder, ...current.filter((order) => order.id !== newOrder.id)])
         toast({
           title: "Sipariş oluşturuldu",
           description: `Sipariş #${newOrder.id.slice(-6)} başarıyla oluşturuldu.`,
         })
-        return newOrder
       }
-      return null
-    } catch (error) {
-      console.error("Failed to create order:", error)
+      return newOrder
+    } catch (cause) {
       toast({
-        title: "Hata",
-        description: "Sipariş oluşturulurken bir hata oluştu.",
+        title: "Sipariş oluşturulamadı",
+        description: cause instanceof Error ? cause.message : "Sipariş işlemi tamamlanamadı.",
         variant: "destructive",
       })
       return null
     }
   }
 
-  const updateOrderStatus = async (
-    orderId: string,
-    status: "Beklemede" | "Hazırlanıyor" | "Hazır" | "Tamamlandı" | "İptal Edildi",
-  ): Promise<boolean> => {
+  const updateOrderStatus = async (orderId: string, status: Order["status"]) => {
     try {
-      const success = await ordersApi.updateStatus(orderId, status)
-      if (success) {
-        setOrders((prev) =>
-          prev.map((order) =>
-            order.id === orderId ? { ...order, status, updatedAt: new Date().toISOString() } : order,
-          ),
-        )
-        return true
-      }
-      return false
-    } catch (error) {
-      console.error("Failed to update order status:", error)
+      await ordersApi.updateStatus(orderId, status)
+      setOrders((current) =>
+        current.map((order) => (order.id === orderId ? { ...order, status, updatedAt: new Date() } : order)),
+      )
+      return true
+    } catch (cause) {
+      toast({
+        title: "Sipariş durumu güncellenemedi",
+        description: cause instanceof Error ? cause.message : "Durum değişikliği tamamlanamadı.",
+        variant: "destructive",
+      })
       return false
     }
   }
 
-  const updatePaymentStatus = async (
-    orderId: string,
-    status: "Beklemede" | "Ödendi",
-    method?: string,
-  ): Promise<boolean> => {
+  const updatePaymentStatus = async (orderId: string, status: Order["paymentStatus"], method?: string) => {
     try {
-      const success = await ordersApi.updatePaymentStatus(orderId, status, method)
-      if (success) {
-        setOrders((prev) =>
-          prev.map((order) =>
-            order.id === orderId
-              ? { ...order, paymentStatus: status, paymentMethod: method, updatedAt: new Date().toISOString() }
-              : order,
-          ),
-        )
-        return true
-      }
-      return false
-    } catch (error) {
-      console.error("Failed to update payment status:", error)
+      await ordersApi.updatePaymentStatus(orderId, status, method)
+      setOrders((current) =>
+        current.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                paymentStatus: status,
+                paymentMethod: method,
+                updatedAt: new Date(),
+              }
+            : order,
+        ),
+      )
+      return true
+    } catch (cause) {
+      toast({
+        title: "Ödeme kaydedilemedi",
+        description: cause instanceof Error ? cause.message : "Ödeme işlemi tamamlanamadı.",
+        variant: "destructive",
+      })
       return false
     }
   }
 
   const updateDeliveryStatus = async (
     orderId: string,
-    status: "Beklemede" | "Yolda" | "Teslim Edildi",
-  ): Promise<boolean> => {
+    status: NonNullable<Order["deliveryStatus"]>,
+    location?: { lat: number; lng: number },
+  ) => {
     try {
-      // Update in database
-      const success = await ordersApi.updateDeliveryStatus(orderId, status)
-
-      if (success) {
-        // Update local state
-        setOrders((prev) =>
-          prev.map((order) =>
-            order.id === orderId
-              ? {
-                  ...order,
-                  deliveryStatus: status,
-                  status: status === "Teslim Edildi" ? "Tamamlandı" : order.status,
-                  updatedAt: new Date().toISOString(),
-                }
-              : order,
-          ),
-        )
-
-        toast({
-          title: "Teslimat Durumu Güncellendi",
-          description: `Sipariş #${orderId.slice(-6)} teslimat durumu "${status}" olarak güncellendi.`,
-        })
-
-        return true
-      }
-      return false
-    } catch (error) {
-      console.error("Failed to update delivery status:", error)
+      await ordersApi.updateDeliveryStatus(orderId, status, location)
+      setOrders((current) =>
+        current.map((order) =>
+          order.id === orderId
+            ? {
+                ...order,
+                deliveryStatus: status,
+                status: status === "Teslim Edildi" ? "Tamamlandı" : order.status,
+                updatedAt: new Date(),
+              }
+            : order,
+        ),
+      )
       toast({
-        title: "Hata",
-        description: "Teslimat durumu güncellenirken bir hata oluştu.",
+        title: "Teslimat durumu güncellendi",
+        description: `Sipariş #${orderId.slice(-6)} için yeni durum: ${status}.`,
+      })
+      return true
+    } catch (cause) {
+      toast({
+        title: "Teslimat durumu güncellenemedi",
+        description: cause instanceof Error ? cause.message : "Teslimat işlemi tamamlanamadı.",
         variant: "destructive",
       })
       return false
     }
-  }
-
-  const refreshOrders = async () => {
-    await loadOrders()
   }
 
   return (
@@ -210,11 +217,8 @@ export function OrderProvider({ children }: { children: ReactNode }) {
 
 export function useOrderContext() {
   const context = useContext(OrderContext)
-  if (context === undefined) {
-    throw new Error("useOrderContext must be used within an OrderProvider")
-  }
+  if (context === undefined) throw new Error("useOrderContext must be used within an OrderProvider")
   return context
 }
 
-// Backward compatibility
 export const useOrders = useOrderContext

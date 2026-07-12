@@ -1,406 +1,359 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
+import { Check, Copy, Edit, Mail, Plus, Shield, Trash2, UserPlus } from "lucide-react"
+import type { MemberRole } from "@/lib/database.types"
+import { membersApi, type RestaurantMember } from "@/lib/api"
 import { Header } from "@/components/header"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { Button } from "@/components/ui/button"
-import { useAuth } from "@/context/auth-context"
-import { useRouter } from "next/navigation"
-import { EmptyState } from "@/components/empty-state"
-import { Plus } from "lucide-react"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useToast } from "@/hooks/use-toast"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Edit, Trash2, UserPlus, Mail, Key, Shield } from "lucide-react"
-import type { User } from "@/lib/types"
+import { useAuth } from "@/context/auth-context"
+import { useToast } from "@/hooks/use-toast"
+
+const roleLabels: Record<MemberRole, string> = {
+  owner: "İşletme sahibi",
+  manager: "Yönetici",
+  cashier: "Kasiyer",
+  waiter: "Garson",
+  kitchen: "Mutfak",
+  courier: "Kurye",
+}
 
 export default function UsersPage() {
-  const { user, isLoading, register } = useAuth()
+  const { user, isLoading: isAuthLoading, refreshUser } = useAuth()
   const router = useRouter()
-  const [showSidebar, setShowSidebar] = useState(true)
-  const [users, setUsers] = useState<any[]>([]) // API'den gelecek
-  const [isAddUserOpen, setIsAddUserOpen] = useState(false)
-  const [isEditUserOpen, setIsEditUserOpen] = useState(false)
-  const [currentUser, setCurrentUser] = useState<User | null>(null)
-  const [searchQuery, setSearchQuery] = useState("")
-  const [userForm, setUserForm] = useState({
-    name: "",
-    email: "",
-    password: "",
-    confirmPassword: "",
-    role: "Garson" as User["role"],
-  })
   const { toast } = useToast()
+  const [showSidebar, setShowSidebar] = useState(true)
+  const [members, setMembers] = useState<RestaurantMember[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [isInviteOpen, setIsInviteOpen] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState("")
+  const [inviteRole, setInviteRole] = useState<MemberRole>("waiter")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [invitationUrl, setInvitationUrl] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [editingMember, setEditingMember] = useState<RestaurantMember | null>(null)
+  const [editingRole, setEditingRole] = useState<MemberRole>("waiter")
+  const [removingMember, setRemovingMember] = useState<RestaurantMember | null>(null)
 
-  // Responsive sidebar kontrolü
-  useEffect(() => {
-    const handleResize = () => {
-      setShowSidebar(window.innerWidth >= 768)
+  const isOwner = user?.memberRole === "owner"
+  const canManage = isOwner || user?.memberRole === "manager"
+
+  const loadMembers = useCallback(async () => {
+    if (!user?.restaurant_id) return
+    setIsLoading(true)
+    try {
+      setMembers(await membersApi.getAll())
+    } catch (cause) {
+      toast({
+        title: "Ekip yüklenemedi",
+        description: cause instanceof Error ? cause.message : "Ekip bilgileri okunamadı.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
     }
+  }, [toast, user?.restaurant_id])
 
+  useEffect(() => {
+    const handleResize = () => setShowSidebar(window.innerWidth >= 768)
     handleResize()
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
   }, [])
 
-  // Kullanıcıları yükle - API'den gelecek
   useEffect(() => {
-    // TODO: API'den kullanıcıları yükle
-    // fetchUsers()
-  }, [])
+    const timeoutId = window.setTimeout(() => void loadMembers(), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [loadMembers])
 
-  if (isLoading) {
+  const filteredMembers = useMemo(() => {
+    const query = searchQuery.trim().toLocaleLowerCase("tr-TR")
+    if (!query) return members
+    return members.filter((member) =>
+      [member.name, member.email, roleLabels[member.role]].some((value) =>
+        value.toLocaleLowerCase("tr-TR").includes(query),
+      ),
+    )
+  }, [members, searchQuery])
+
+  const createInvitation = async () => {
+    if (!inviteEmail.trim()) return
+    setIsSubmitting(true)
+    try {
+      const invitation = await membersApi.createInvitation(inviteEmail, inviteRole)
+      setInvitationUrl(`${window.location.origin}/invite/${invitation.token}`)
+      toast({ title: "Davet oluşturuldu", description: "Bağlantıyı ekip üyesiyle güvenli biçimde paylaşın." })
+    } catch (cause) {
+      toast({
+        title: "Davet oluşturulamadı",
+        description: cause instanceof Error ? cause.message : "Davet işlemi tamamlanamadı.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const copyInvitation = async () => {
+    if (!invitationUrl) return
+    await navigator.clipboard.writeText(invitationUrl)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1800)
+  }
+
+  const closeInvitation = () => {
+    setIsInviteOpen(false)
+    setInviteEmail("")
+    setInviteRole("waiter")
+    setInvitationUrl(null)
+    setCopied(false)
+  }
+
+  const updateMemberRole = async () => {
+    if (!editingMember) return
+    setIsSubmitting(true)
+    try {
+      await membersApi.updateRole(editingMember.id, editingRole)
+      setEditingMember(null)
+      await loadMembers()
+      if (editingMember.id === user?.id) await refreshUser()
+      toast({ title: "Rol güncellendi", description: `${editingMember.name} için yeni rol kaydedildi.` })
+    } catch (cause) {
+      toast({
+        title: "Rol güncellenemedi",
+        description: cause instanceof Error ? cause.message : "Rol değişikliği tamamlanamadı.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const removeMember = async () => {
+    if (!removingMember) return
+    setIsSubmitting(true)
+    try {
+      await membersApi.remove(removingMember.id)
+      toast({ title: "Üye kaldırıldı", description: `${removingMember.name} ekipten kaldırıldı.` })
+      setRemovingMember(null)
+      await loadMembers()
+    } catch (cause) {
+      toast({
+        title: "Üye kaldırılamadı",
+        description: cause instanceof Error ? cause.message : "Üye kaldırma işlemi tamamlanamadı.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const canRemoveMember = (member: RestaurantMember) => {
+    if (member.id === user?.id) return false
+    if (isOwner) return true
+    return user?.memberRole === "manager" && member.role !== "owner" && member.role !== "manager"
+  }
+
+  if (isAuthLoading || isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-orange-500"></div>
+      <div className="grid h-screen place-items-center bg-gray-50">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-orange-600" />
       </div>
     )
   }
 
   if (!user) {
-    router.push("/login")
+    router.replace("/login")
     return null
   }
-
-  const handleAddFirstUser = () => {
-    setIsAddUserOpen(true)
-  }
-
-  const handleAddUser = async () => {
-    if (!userForm.name || !userForm.email || !userForm.password) {
-      toast({
-        title: "Eksik bilgi",
-        description: "Lütfen tüm zorunlu alanları doldurun.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (userForm.password !== userForm.confirmPassword) {
-      toast({
-        title: "Şifreler eşleşmiyor",
-        description: "Girdiğiniz şifreler eşleşmiyor.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    try {
-      const result = await register(userForm.name, userForm.email, userForm.password, userForm.role)
-
-      if (result.success) {
-        // Yeni kullanıcıyı listeye ekle
-        const newUser: User = {
-          id: Math.random().toString(36).substring(2, 9),
-          name: userForm.name,
-          email: userForm.email,
-          role: userForm.role,
-          avatar: "/placeholder.svg?height=40&width=40",
-        }
-
-        setUsers([...users, newUser])
-        setIsAddUserOpen(false)
-
-        // Formu temizle
-        setUserForm({
-          name: "",
-          email: "",
-          password: "",
-          confirmPassword: "",
-          role: "Garson",
-        })
-
-        toast({
-          title: "Kullanıcı eklendi",
-          description: `${userForm.name} başarıyla eklendi.`,
-        })
-      } else {
-        toast({
-          title: "Hata",
-          description: result.message || "Kullanıcı eklenirken bir hata oluştu.",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      toast({
-        title: "Hata",
-        description: "Kullanıcı eklenirken bir hata oluştu.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const handleEditUser = (user: User) => {
-    setCurrentUser(user)
-    setUserForm({
-      name: user.name,
-      email: user.email,
-      password: "",
-      confirmPassword: "",
-      role: user.role,
-    })
-    setIsEditUserOpen(true)
-  }
-
-  const handleUpdateUser = () => {
-    if (!currentUser) return
-
-    const updatedUsers = users.map((u) =>
-      u.id === currentUser.id ? { ...u, name: userForm.name, email: userForm.email, role: userForm.role } : u,
-    )
-
-    setUsers(updatedUsers)
-    setIsEditUserOpen(false)
-
-    toast({
-      title: "Kullanıcı güncellendi",
-      description: `${userForm.name} başarıyla güncellendi.`,
-    })
-  }
-
-  const handleDeleteUser = (id: string, name: string) => {
-    setUsers(users.filter((u) => u.id !== id))
-
-    toast({
-      title: "Kullanıcı silindi",
-      description: `${name} başarıyla silindi.`,
-    })
-  }
-
-  const filteredUsers = users.filter(
-    (user) =>
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.role.toLowerCase().includes(searchQuery.toLowerCase()),
-  )
 
   return (
     <div className="flex h-screen bg-gray-100">
       {showSidebar && <SidebarNav />}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header showMobileMenu={!showSidebar} onMenuToggle={() => setShowSidebar(!showSidebar)} />
-        <div className="flex-1 overflow-auto p-4">
-          <div className="flex justify-between items-center mb-6">
-            <h1 className="text-2xl font-bold">Kullanıcı Yönetimi</h1>
-            <Button onClick={handleAddFirstUser}>
-              <Plus className="mr-2 h-4 w-4" />
-              Yeni Kullanıcı
-            </Button>
+        <main className="flex-1 overflow-auto p-4 md:p-6">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold text-gray-950">Ekip Yönetimi</h1>
+              <p className="mt-1 text-sm text-gray-500">Rolleri ve restoran erişimlerini yönetin.</p>
+            </div>
+            {canManage && (
+              <Button onClick={() => setIsInviteOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
+                Üye davet et
+              </Button>
+            )}
           </div>
 
-          {users.length === 0 ? (
-            <EmptyState
-              type="users"
-              title="Henüz kullanıcı yok"
-              description="Sisteme yeni kullanıcılar ekleyerek ekip yönetimini başlatın."
-              onAction={handleAddFirstUser}
-              actionLabel="İlk Kullanıcıyı Ekle"
-            />
-          ) : (
-            <div>
-              <div className="mb-6">
-                <Input
-                  placeholder="Kullanıcı ara..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="max-w-md"
-                />
-              </div>
+          <Input
+            aria-label="Ekipte ara"
+            placeholder="Ad, e-posta veya rol ara"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            className="mb-5 max-w-md"
+          />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {filteredUsers.map((user) => (
-                  <Card key={user.id}>
-                    <CardHeader className="pb-2">
-                      <div className="flex justify-between items-start">
-                        <CardTitle className="text-lg">{user.name}</CardTitle>
-                        <div className="px-2 py-1 rounded-full text-xs font-medium bg-gray-100">{user.role}</div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="pb-2">
-                      <div className="flex items-center space-x-4">
-                        <Avatar className="h-12 w-12">
-                          <AvatarImage src={user.avatar || "/placeholder.svg"} alt={user.name} />
-                          <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="text-sm text-gray-500">{user.email}</p>
-                          <p className="text-xs text-gray-400">ID: {user.id}</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                    <CardFooter className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" onClick={() => handleEditUser(user)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {filteredMembers.map((member) => (
+              <Card key={member.id}>
+                <CardHeader className="pb-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <CardTitle className="text-base">{member.name}</CardTitle>
+                    <span className="rounded bg-gray-100 px-2 py-1 text-xs font-medium text-gray-700">
+                      {roleLabels[member.role]}
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent className="pb-3">
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-11 w-11">
+                      <AvatarImage src={member.avatar || "/placeholder.svg"} alt="" />
+                      <AvatarFallback>{member.name.charAt(0).toLocaleUpperCase("tr-TR")}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-gray-600">{member.email}</p>
+                      {member.id === user.id && <p className="mt-1 text-xs font-medium text-orange-700">Siz</p>}
+                    </div>
+                  </div>
+                </CardContent>
+                {(isOwner || canRemoveMember(member)) && (
+                  <CardFooter className="justify-end gap-2">
+                    {isOwner && (
                       <Button
                         variant="outline"
-                        size="sm"
-                        className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                        onClick={() => handleDeleteUser(user.id, user.name)}
+                        size="icon"
+                        title="Rolü düzenle"
+                        onClick={() => {
+                          setEditingMember(member)
+                          setEditingRole(member.role)
+                        }}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Edit className="h-4 w-4" aria-hidden="true" />
                       </Button>
-                    </CardFooter>
-                  </Card>
-                ))}
+                    )}
+                    {canRemoveMember(member) && (
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        title="Üyeyi kaldır"
+                        className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                        onClick={() => setRemovingMember(member)}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    )}
+                  </CardFooter>
+                )}
+              </Card>
+            ))}
+          </div>
+        </main>
+      </div>
+
+      <Dialog open={isInviteOpen} onOpenChange={(open) => (open ? setIsInviteOpen(true) : closeInvitation())}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{invitationUrl ? "Davet bağlantısı" : "Ekip üyesi davet et"}</DialogTitle>
+          </DialogHeader>
+          {invitationUrl ? (
+            <div className="space-y-4 py-3">
+              <p className="text-sm text-gray-600">Bu bağlantı yedi gün geçerli ve yalnızca davet edilen e-posta ile kullanılabilir.</p>
+              <div className="flex gap-2">
+                <Input value={invitationUrl} readOnly aria-label="Davet bağlantısı" />
+                <Button type="button" size="icon" title="Bağlantıyı kopyala" onClick={copyInvitation}>
+                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 py-3">
+              <div className="space-y-2">
+                <Label htmlFor="invite-email" className="flex items-center gap-2">
+                  <Mail className="h-4 w-4" aria-hidden="true" />
+                  E-posta
+                </Label>
+                <Input
+                  id="invite-email"
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(event) => setInviteEmail(event.target.value)}
+                  autoComplete="email"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="invite-role" className="flex items-center gap-2">
+                  <Shield className="h-4 w-4" aria-hidden="true" />
+                  Rol
+                </Label>
+                <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
+                  <SelectTrigger id="invite-role"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {isOwner && <SelectItem value="manager">Yönetici</SelectItem>}
+                    <SelectItem value="cashier">Kasiyer</SelectItem>
+                    <SelectItem value="waiter">Garson</SelectItem>
+                    <SelectItem value="kitchen">Mutfak</SelectItem>
+                    <SelectItem value="courier">Kurye</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Add User Dialog */}
-      <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Yeni Kullanıcı Ekle</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="name" className="flex items-center gap-2">
-                <UserPlus className="h-4 w-4" />
-                Kullanıcı Adı
-              </Label>
-              <Input
-                id="name"
-                value={userForm.name}
-                onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
-                placeholder="Kullanıcı adını girin"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="email" className="flex items-center gap-2">
-                <Mail className="h-4 w-4" />
-                E-posta
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                value={userForm.email}
-                onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-                placeholder="E-posta adresini girin"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password" className="flex items-center gap-2">
-                <Key className="h-4 w-4" />
-                Şifre
-              </Label>
-              <Input
-                id="password"
-                type="password"
-                value={userForm.password}
-                onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                placeholder="Şifre girin"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword" className="flex items-center gap-2">
-                <Key className="h-4 w-4" />
-                Şifre Tekrar
-              </Label>
-              <Input
-                id="confirmPassword"
-                type="password"
-                value={userForm.confirmPassword}
-                onChange={(e) => setUserForm({ ...userForm, confirmPassword: e.target.value })}
-                placeholder="Şifreyi tekrar girin"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="role" className="flex items-center gap-2">
-                <Shield className="h-4 w-4" />
-                Rol
-              </Label>
-              <Select
-                value={userForm.role}
-                onValueChange={(value) => setUserForm({ ...userForm, role: value as User["role"] })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Rol seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Yönetici">Yönetici</SelectItem>
-                  <SelectItem value="Garson">Garson</SelectItem>
-                  <SelectItem value="Şef">Şef</SelectItem>
-                  <SelectItem value="Kasiyer">Kasiyer</SelectItem>
-                  <SelectItem value="Kurye">Kurye</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddUserOpen(false)}>
-              İptal
-            </Button>
-            <Button onClick={handleAddUser}>Kullanıcı Ekle</Button>
+            <Button variant="outline" onClick={closeInvitation}>{invitationUrl ? "Kapat" : "İptal"}</Button>
+            {!invitationUrl && (
+              <Button onClick={createInvitation} disabled={isSubmitting || !inviteEmail.trim()}>
+                <UserPlus className="mr-2 h-4 w-4" aria-hidden="true" />
+                {isSubmitting ? "Oluşturuluyor..." : "Davet oluştur"}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Edit User Dialog */}
-      <Dialog open={isEditUserOpen} onOpenChange={setIsEditUserOpen}>
+      <Dialog open={Boolean(editingMember)} onOpenChange={(open) => !open && setEditingMember(null)}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Kullanıcı Düzenle</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-name" className="flex items-center gap-2">
-                <UserPlus className="h-4 w-4" />
-                Kullanıcı Adı
-              </Label>
-              <Input
-                id="edit-name"
-                value={userForm.name}
-                onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
-                placeholder="Kullanıcı adını girin"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-email" className="flex items-center gap-2">
-                <Mail className="h-4 w-4" />
-                E-posta
-              </Label>
-              <Input
-                id="edit-email"
-                type="email"
-                value={userForm.email}
-                onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-                placeholder="E-posta adresini girin"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-role" className="flex items-center gap-2">
-                <Shield className="h-4 w-4" />
-                Rol
-              </Label>
-              <Select
-                value={userForm.role}
-                onValueChange={(value) => setUserForm({ ...userForm, role: value as User["role"] })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Rol seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Yönetici">Yönetici</SelectItem>
-                  <SelectItem value="Garson">Garson</SelectItem>
-                  <SelectItem value="Şef">Şef</SelectItem>
-                  <SelectItem value="Kasiyer">Kasiyer</SelectItem>
-                  <SelectItem value="Kurye">Kurye</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <DialogHeader><DialogTitle>Üye rolünü düzenle</DialogTitle></DialogHeader>
+          <div className="space-y-2 py-3">
+            <Label htmlFor="member-role">{editingMember?.name}</Label>
+            <Select value={editingRole} onValueChange={(value) => setEditingRole(value as MemberRole)}>
+              <SelectTrigger id="member-role"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="owner">İşletme sahibi</SelectItem>
+                <SelectItem value="manager">Yönetici</SelectItem>
+                <SelectItem value="cashier">Kasiyer</SelectItem>
+                <SelectItem value="waiter">Garson</SelectItem>
+                <SelectItem value="kitchen">Mutfak</SelectItem>
+                <SelectItem value="courier">Kurye</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditUserOpen(false)}>
-              İptal
-            </Button>
-            <Button onClick={handleUpdateUser}>Değişiklikleri Kaydet</Button>
+            <Button variant="outline" onClick={() => setEditingMember(null)}>İptal</Button>
+            <Button onClick={updateMemberRole} disabled={isSubmitting}>Kaydet</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(removingMember)} onOpenChange={(open) => !open && setRemovingMember(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Üyeyi ekipten kaldır</DialogTitle></DialogHeader>
+          <p className="py-3 text-sm text-gray-600">
+            {removingMember?.name} restoran verilerine erişimini hemen kaybedecek.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRemovingMember(null)}>Vazgeç</Button>
+            <Button variant="destructive" onClick={removeMember} disabled={isSubmitting}>Üyeyi kaldır</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

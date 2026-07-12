@@ -1,9 +1,9 @@
 "use client"
 
-import type React from "react"
-import { createContext, useContext, useState, useEffect } from "react"
-import { v4 as uuidv4 } from "uuid"
-import type { FoodItem, CartItem } from "@/lib/types"
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import type { CartItem, FoodItem } from "@/lib/types"
+import { useAuth } from "@/context/auth-context"
+import { calculateOrderTotals } from "@/lib/utils"
 
 interface CartContextType {
   items: CartItem[]
@@ -20,93 +20,101 @@ interface CartContextType {
   setTableInfo: (id: string | null, name: string | null, customer: string | null) => void
 }
 
+interface CartSnapshot {
+  items: CartItem[]
+  tableId: string | null
+  tableName: string | null
+  customerName: string | null
+}
+
 const CartContext = createContext<CartContextType | undefined>(undefined)
 
-export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+function isCartSnapshot(value: unknown): value is CartSnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const snapshot = value as Partial<CartSnapshot>
+  return Array.isArray(snapshot.items)
+}
+
+export function CartProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
   const [items, setItems] = useState<CartItem[]>([])
   const [tableId, setTableId] = useState<string | null>(null)
   const [tableName, setTableName] = useState<string | null>(null)
   const [customerName, setCustomerName] = useState<string | null>(null)
+  const [storageKey, setStorageKey] = useState<string | null>(null)
 
-  // Load cart from localStorage on component mount
   useEffect(() => {
-    const savedCart = localStorage.getItem("restaurant-cart")
-    const savedTableId = localStorage.getItem("restaurant-table-id")
-    const savedTableName = localStorage.getItem("restaurant-table-name")
-    const savedCustomerName = localStorage.getItem("restaurant-customer-name")
-
-    if (savedCart) {
-      try {
-        setItems(JSON.parse(savedCart))
-      } catch (error) {
-        console.error("Failed to parse cart from localStorage:", error)
+    const timeoutId = window.setTimeout(() => {
+      if (!user?.restaurant_id) {
+        setItems([])
+        setTableId(null)
+        setTableName(null)
+        setCustomerName(null)
+        setStorageKey(null)
+        return
       }
-    }
 
-    if (savedTableId) setTableId(savedTableId)
-    if (savedTableName) setTableName(savedTableName)
-    if (savedCustomerName) setCustomerName(savedCustomerName)
-  }, [])
+      const nextStorageKey = `restaurant-cart:${user.restaurant_id}:${user.id}`
+      const savedCart = sessionStorage.getItem(nextStorageKey)
+      if (savedCart) {
+        try {
+          const parsed: unknown = JSON.parse(savedCart)
+          if (isCartSnapshot(parsed)) {
+            setItems(parsed.items)
+            setTableId(parsed.tableId ?? null)
+            setTableName(parsed.tableName ?? null)
+            setCustomerName(parsed.customerName ?? null)
+          }
+        } catch {
+          sessionStorage.removeItem(nextStorageKey)
+        }
+      } else {
+        setItems([])
+        setTableId(null)
+        setTableName(null)
+        setCustomerName(null)
+      }
+      setStorageKey(nextStorageKey)
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [user?.id, user?.restaurant_id])
 
-  // Save cart to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem("restaurant-cart", JSON.stringify(items))
-  }, [items])
-
-  // Save table info to localStorage whenever it changes
-  useEffect(() => {
-    if (tableId) localStorage.setItem("restaurant-table-id", tableId)
-    else localStorage.removeItem("restaurant-table-id")
-
-    if (tableName) localStorage.setItem("restaurant-table-name", tableName)
-    else localStorage.removeItem("restaurant-table-name")
-
-    if (customerName) localStorage.setItem("restaurant-customer-name", customerName)
-    else localStorage.removeItem("restaurant-customer-name")
-  }, [tableId, tableName, customerName])
+    if (!storageKey) return
+    const snapshot: CartSnapshot = { items, tableId, tableName, customerName }
+    sessionStorage.setItem(storageKey, JSON.stringify(snapshot))
+  }, [customerName, items, storageKey, tableId, tableName])
 
   const addItem = (foodItem: FoodItem, quantity = 1, notes?: string) => {
-    setItems((prevItems) => {
-      // Check if item already exists in cart
-      const existingItemIndex = prevItems.findIndex((item) => item.foodItem.id === foodItem.id)
-
-      if (existingItemIndex !== -1) {
-        // Update existing item
-        const updatedItems = [...prevItems]
-        updatedItems[existingItemIndex] = {
-          ...updatedItems[existingItemIndex],
-          quantity: updatedItems[existingItemIndex].quantity + quantity,
-          notes: notes || updatedItems[existingItemIndex].notes,
-        }
-        return updatedItems
-      } else {
-        // Add new item
-        return [...prevItems, { id: uuidv4(), foodItem, quantity, notes }]
+    setItems((current) => {
+      const existingIndex = current.findIndex((item) => item.foodItem.id === foodItem.id)
+      if (existingIndex === -1) {
+        return [...current, { id: crypto.randomUUID(), foodItem, quantity, notes }]
       }
+
+      return current.map((item, index) =>
+        index === existingIndex
+          ? { ...item, quantity: item.quantity + quantity, notes: notes || item.notes }
+          : item,
+      )
     })
   }
 
-  const removeItem = (id: string) => {
-    setItems((prevItems) => prevItems.filter((item) => item.id !== id))
-  }
+  const removeItem = (id: string) => setItems((current) => current.filter((item) => item.id !== id))
 
   const updateQuantity = (id: string, quantity: number) => {
-    setItems((prevItems) => {
-      if (quantity <= 0) {
-        return prevItems.filter((item) => item.id !== id)
-      }
-
-      return prevItems.map((item) => (item.id === id ? { ...item, quantity } : item))
-    })
+    setItems((current) =>
+      quantity <= 0
+        ? current.filter((item) => item.id !== id)
+        : current.map((item) => (item.id === id ? { ...item, quantity } : item)),
+    )
   }
 
   const updateNotes = (id: string, notes: string) => {
-    setItems((prevItems) => prevItems.map((item) => (item.id === id ? { ...item, notes } : item)))
+    setItems((current) => current.map((item) => (item.id === id ? { ...item, notes } : item)))
   }
 
-  const clearCart = () => {
-    setItems([])
-  }
+  const clearCart = () => setItems([])
 
   const setTableInfo = (id: string | null, name: string | null, customer: string | null) => {
     setTableId(id)
@@ -114,8 +122,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCustomerName(customer)
   }
 
-  const totalItems = items.reduce((total, item) => total + item.quantity, 0)
-  const totalPrice = items.reduce((total, item) => total + item.foodItem.price * item.quantity, 0)
+  const cartTotals = calculateOrderTotals(items, 0)
 
   return (
     <CartContext.Provider
@@ -126,8 +133,8 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateQuantity,
         updateNotes,
         clearCart,
-        totalItems,
-        totalPrice,
+        totalItems: items.reduce((total, item) => total + item.quantity, 0),
+        totalPrice: cartTotals.netSubtotal,
         tableId,
         tableName,
         customerName,
@@ -139,13 +146,10 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   )
 }
 
-export const useCart = () => {
+export function useCart() {
   const context = useContext(CartContext)
-  if (context === undefined) {
-    throw new Error("useCart must be used within a CartProvider")
-  }
+  if (context === undefined) throw new Error("useCart must be used within a CartProvider")
   return context
 }
 
-// For backward compatibility
 export const useCartContext = useCart

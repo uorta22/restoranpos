@@ -19,7 +19,7 @@ export default function TrackPage() {
     e.preventDefault()
 
     if (!orderId.trim()) {
-      setError("Lütfen sipariş numarası girin")
+      setError("Lütfen takip kodunu girin")
       return
     }
 
@@ -27,9 +27,8 @@ export default function TrackPage() {
     setError("")
 
     try {
-      // Validate order ID format (basic validation)
-      if (orderId.length < 3) {
-        throw new Error("Geçersiz sipariş numarası")
+      if (!/^[0-9a-f-]{36}$/i.test(orderId.trim())) {
+        throw new Error("Geçersiz takip kodu")
       }
 
       // Navigate to order tracking page
@@ -48,14 +47,14 @@ export default function TrackPage() {
             <Package className="w-6 h-6 text-blue-600" />
           </div>
           <CardTitle className="text-2xl">Sipariş Takibi</CardTitle>
-          <CardDescription>Sipariş numaranızı girerek siparişinizin durumunu takip edebilirsiniz</CardDescription>
+          <CardDescription>Size gönderilen güvenli takip koduyla teslimat durumunu görüntüleyin</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleTrack} className="space-y-4">
             <div>
               <Input
                 type="text"
-                placeholder="Sipariş numaranızı girin"
+                placeholder="Takip kodunu girin"
                 value={orderId}
                 onChange={(e) => setOrderId(e.target.value)}
                 className="text-center text-lg"
@@ -86,7 +85,7 @@ export default function TrackPage() {
           </form>
 
           <div className="mt-6 text-center text-sm text-gray-500">
-            <p>Sipariş numaranızı SMS veya e-posta ile aldınız</p>
+            <p>Takip kodunuz restoranın paylaştığı bağlantıda yer alır</p>
           </div>
         </CardContent>
       </Card>

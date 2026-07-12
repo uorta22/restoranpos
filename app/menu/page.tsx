@@ -3,8 +3,9 @@
 import type React from "react"
 
 import { ProductForm } from "@/components/product-form"
-import { useState, useEffect, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Header } from "@/components/header"
+import { ProductImage } from "@/components/product-image"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -32,12 +33,50 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import Script from "next/script"
 
 // Import API functions
 import { productsApi } from "@/lib/api"
 // Import EmptyState component
 import { EmptyState } from "@/components/empty-state"
+
+function escapeCsvCell(value: string | number | boolean) {
+  const text = String(value)
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text
+}
+
+function parseCsv(content: string) {
+  const rows: string[][] = []
+  let row: string[] = []
+  let value = ""
+  let quoted = false
+
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index]
+    if (character === '"') {
+      if (quoted && content[index + 1] === '"') {
+        value += '"'
+        index += 1
+      } else {
+        quoted = !quoted
+      }
+    } else if (character === "," && !quoted) {
+      row.push(value)
+      value = ""
+    } else if ((character === "\n" || character === "\r") && !quoted) {
+      if (character === "\r" && content[index + 1] === "\n") index += 1
+      row.push(value)
+      if (row.some((cell) => cell.trim())) rows.push(row)
+      row = []
+      value = ""
+    } else {
+      value += character
+    }
+  }
+
+  row.push(value)
+  if (row.some((cell) => cell.trim())) rows.push(row)
+  return rows
+}
 
 export default function MenuPage() {
   const { user, isLoading } = useAuth()
@@ -53,22 +92,12 @@ export default function MenuPage() {
   const [isBulkMode, setIsBulkMode] = useState(false)
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false)
   const [isExcelLoading, setIsExcelLoading] = useState(false)
-  const [isExcelScriptLoaded, setIsExcelScriptLoaded] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const [importStatus, setImportStatus] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [initialLoadDone, setInitialLoadDone] = useState(false)
-  const [categories, setCategories] = useState<string[]>([])
-  const [shouldRedirect, setShouldRedirect] = useState(false)
-  const [
-    /* @ts-expect-error: unused variable */ isDatabaseSetup,
-    /* @ts-expect-error: unused variable */ setIsDatabaseSetup,
-  ] = useState<boolean | null>(null)
-  const [
-    /* @ts-expect-error: unused variable */ isSettingUpDatabase,
-    /* @ts-expect-error: unused variable */ setIsSettingUpDatabase,
-  ] = useState(false)
+  const categories = useMemo(() => [...new Set(products.map((item) => item.category))], [products])
+  const canManage = user?.memberRole === "owner" || user?.memberRole === "manager"
 
   // Responsive sidebar kontrolü
   useEffect(() => {
@@ -80,122 +109,39 @@ export default function MenuPage() {
     window.addEventListener("resize", handleResize)
     return () => window.removeEventListener("resize", handleResize)
   }, [])
-
-  // Excel kütüphanesini yükle
   useEffect(() => {
-    if (typeof window !== "undefined" && window.XLSX) {
-      setIsExcelScriptLoaded(true)
-      return
-    }
-
-    const script = document.createElement("script")
-    script.src = "https://cdn.sheetjs.com/xlsx-0.19.3/package/dist/xlsx.full.min.js"
-    script.async = true
-    script.onload = () => {
-      console.log("Excel kütüphanesi yüklendi")
-      setIsExcelScriptLoaded(true)
-    }
-    script.onerror = () => {
-      console.error("Excel kütüphanesi yüklenemedi")
-      toast({
-        title: "Excel kütüphanesi yüklenemedi",
-        description: "Excel işlemleri kullanılamayabilir.",
-        variant: "destructive",
+    if (!user?.restaurant_id) return
+    let active = true
+    void productsApi
+      .getAll(user.restaurant_id)
+      .then((fetchedProducts) => {
+        if (active) setProducts(fetchedProducts)
       })
-    }
-    document.body.appendChild(script)
-
-    return () => {
-      if (document.body.contains(script)) {
-        document.body.removeChild(script)
-      }
-    }
-  }, [toast])
-
-  // Ensure FoodItem type from "@/lib/types" includes category_id and restaurant_id if you use it directly for state.
-  // Or rely on the return type of productsApi.getAll().
-
-  // ... (useState declarations)
-  // const [categories, setCategories] = useState<string[]>([]); // This should ideally be Category[]
-  // For now, we'll adapt, but this is a point for future refactoring.
-
-  // useEffect to load data
-  useEffect(() => {
-    const loadData = async () => {
-      if (!user || !user.restaurant_id) {
-        if (initialLoadDone && !isLoading) {
-          toast({
-            title: "Kullanıcı bilgileri eksik",
-            description: "Restoran verileri yüklenemedi. Lütfen tekrar giriş yapın.",
-            variant: "warning",
-          })
-        }
-        return
-      }
-      try {
-        const fetchedProducts = await productsApi.getAll(user.restaurant_id)
-        setProducts(fetchedProducts)
-
-        // Temporary category handling: derive from fetched products until categoriesApi is refactored
-        const uniqueCategoryNames = [...new Set(fetchedProducts.map((p) => p.category).filter(Boolean))]
-        setCategories(uniqueCategoryNames)
-
-        // Ideal category fetching (requires categoriesApi to be restaurant_id aware and return Category[]):
-        // const fetchedCategories = await categoriesApi.getAll(user.restaurant_id);
-        // setCategories(fetchedCategories); // Assuming setCategories expects Category[]
-      } catch (error) {
-        console.error("Failed to load data:", error)
+      .catch(() => {
         toast({
           title: "Veri yüklenemedi",
           description: "Veriler yüklenirken bir hata oluştu.",
           variant: "destructive",
         })
-      } finally {
-        setInitialLoadDone(true)
-      }
+      })
+    return () => {
+      active = false
     }
+  }, [toast, user?.restaurant_id])
 
-    if (user && user.restaurant_id) {
-      // Avoid re-fetching if data is already loaded and initialLoadDone is true,
-      // unless there's a specific trigger to reload (e.g. products state changes elsewhere).
-      // For simplicity, this loads when user/restaurant_id becomes available.
-      loadData()
-    } else if (!isLoading && !user) {
-      setInitialLoadDone(true)
-    }
-    // }, [user, isLoading, toast, initialLoadDone]); // Original
-  }, [user, user?.restaurant_id, isLoading, toast]) // Refined dependencies, remove initialLoadDone if loadData sets it. Re-add if needed for specific logic.
-
-  // products değiştiğinde kategorileri otomatik güncelle
-  useEffect(() => {
-    const updatedCategories = [...new Set(products.map((item) => item.category))]
-    setCategories(updatedCategories)
-  }, [products])
-
-  // Dialog kapandığında state'leri sıfırla
-  useEffect(() => {
-    if (!isImportDialogOpen) {
+  const handleImportDialogChange = (open: boolean) => {
+    setIsImportDialogOpen(open)
+    if (!open) {
       setSelectedFile(null)
       setImportError(null)
       setImportStatus(null)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ""
-      }
+      if (fileInputRef.current) fileInputRef.current.value = ""
     }
-  }, [isImportDialogOpen])
-
-  // Auth kontrolü
-  useEffect(() => {
-    if (!user && !isLoading) {
-      setShouldRedirect(true)
-    }
-  }, [user, isLoading])
+  }
 
   useEffect(() => {
-    if (shouldRedirect) {
-      router.push("/login")
-    }
-  }, [shouldRedirect, router])
+    if (!user && !isLoading) router.replace("/login")
+  }, [isLoading, router, user])
 
   if (isLoading) {
     return (
@@ -205,16 +151,16 @@ export default function MenuPage() {
     )
   }
 
-  if (shouldRedirect) {
-    return null
-  }
+  if (!user) return null
 
   const handleAddItem = () => {
+    if (!canManage) return
     setCurrentProduct(undefined)
     setIsAddProductOpen(true)
   }
 
   const handleEditItem = (id: string) => {
+    if (!canManage) return
     const product = products.find((item) => item.id === id)
     if (product) {
       setCurrentProduct({ ...product })
@@ -223,6 +169,7 @@ export default function MenuPage() {
   }
 
   const handleDeleteItem = async (id: string) => {
+    if (!canManage) return
     if (!user || !user.restaurant_id) {
       toast({ title: "Hata", description: "Kullanıcı veya restoran bilgisi eksik.", variant: "destructive" })
       return
@@ -236,46 +183,32 @@ export default function MenuPage() {
       } else {
         throw new Error("Delete failed")
       }
-    } catch (error) {
+    } catch {
       toast({ title: "Hata", description: "Ürün silinirken bir hata oluştu.", variant: "destructive" })
     }
   }
 
   const handleSaveProduct = async (productFormData: FoodItem) => {
-    // productFormData comes from ProductForm.
-    // CRITICAL ASSUMPTION: ProductForm's onSave provides `productFormData`
-    // that includes `category_id`. If it only provides `category` (name),
-    // you'll need to find the `category_id` here using a list of Category objects.
-    // This example proceeds assuming `productFormData.category_id` is available.
-
+    if (!canManage) return
     if (!user || !user.restaurant_id) {
       toast({ title: "Hata", description: "Kullanıcı veya restoran bilgisi eksik.", variant: "destructive" })
       return
     }
 
-    if (!productFormData.category_id) {
-      toast({
-        title: "Eksik Bilgi",
-        description: "Ürün kategorisi ID'si bulunamadı. Lütfen ürün formunu kontrol edin.",
-        variant: "destructive",
-      })
-      // This indicates ProductForm needs to be updated to provide category_id.
-      return
-    }
-
     try {
-      let result
+      let result: FoodItem | null
       const payload = {
         title: productFormData.title,
         description: productFormData.description,
         price: productFormData.price,
         image: productFormData.image,
-        category_id: productFormData.category_id, // Directly use from form data
+        category_id: productFormData.category_id,
+        category: productFormData.category,
         available: productFormData.available,
         type: productFormData.type,
         discount: productFormData.discount,
         stock: productFormData.stock,
-        restaurant_id: user.restaurant_id, // Add restaurant_id from auth user
+        restaurant_id: user.restaurant_id,
       }
 
       if (products.some((item) => item.id === productFormData.id)) {
@@ -284,7 +217,8 @@ export default function MenuPage() {
         const { restaurant_id, ...updatePayload } = payload // restaurant_id is passed as separate param for update
         result = await productsApi.update(productFormData.id, updatePayload, restaurant_id)
         if (result) {
-          setProducts(products.map((item) => (item.id === productFormData.id ? result : item)))
+          const updatedProduct = result
+          setProducts(products.map((item) => (item.id === productFormData.id ? updatedProduct : item)))
           toast({ title: "Ürün güncellendi", description: "Ürün başarıyla güncellendi." })
         }
       } else {
@@ -301,7 +235,7 @@ export default function MenuPage() {
       }
       setIsAddProductOpen(false)
       setIsEditProductOpen(false)
-    } catch (error) {
+    } catch {
       toast({ title: "Hata", description: "İşlem sırasında bir hata oluştu.", variant: "destructive" })
     }
   }
@@ -329,6 +263,7 @@ export default function MenuPage() {
   }
 
   const handleBulkDelete = async () => {
+    if (!canManage) return
     if (selectedProducts.length === 0) {
       toast({
         title: "Seçili ürün yok",
@@ -354,7 +289,7 @@ export default function MenuPage() {
       })
 
       setIsBulkMode(false)
-    } catch (error) {
+    } catch {
       toast({
         title: "Hata",
         description: "Ürünler silinirken bir hata oluştu.",
@@ -363,106 +298,44 @@ export default function MenuPage() {
     }
   }
 
-  const downloadExcelFile = (data: any[], fileName: string) => {
-    try {
-      if (typeof window === "undefined" || !window.XLSX) {
-        toast({
-          title: "Excel kütüphanesi yüklenemedi",
-          description: "Lütfen sayfayı yenileyip tekrar deneyin.",
-          variant: "destructive",
-        })
-        return false
-      }
-
-      const XLSX = window.XLSX
-      const worksheet = XLSX.utils.json_to_sheet(data)
-      const workbook = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(workbook, worksheet, "Sayfa1")
-      const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" })
-      const blob = new Blob([excelBuffer], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = fileName
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-
-      return true
-    } catch (error) {
-      console.error("Excel indirme hatası:", error)
-      toast({
-        title: "Excel indirme hatası",
-        description: "Excel dosyası oluşturulurken bir hata oluştu.",
-        variant: "destructive",
-      })
-      return false
-    }
+  const downloadCsv = (rows: Array<Array<string | number | boolean>>, fileName: string) => {
+    const content = `\uFEFF${rows.map((row) => row.map(escapeCsvCell).join(",")).join("\r\n")}`
+    const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }))
+    const link = document.createElement("a")
+    link.href = url
+    link.download = fileName
+    link.click()
+    URL.revokeObjectURL(url)
   }
 
   const exportToExcel = () => {
     setIsExcelLoading(true)
-
-    try {
-      const excelData = products.map((product) => ({
-        ID: product.id,
-        "Ürün Adı": product.title,
-        Açıklama: product.description || "",
-        Fiyat: product.price,
-        Kategori: product.category,
-        Tür: product.type,
-        Mevcut: product.available ? "Evet" : "Hayır",
-        İndirim: product.discount || 0,
-        "Resim URL": product.image || "",
-      }))
-
-      const success = downloadExcelFile(excelData, "menu-urunleri.xlsx")
-
-      if (success) {
-        toast({
-          title: "Dışa aktarma başarılı",
-          description: "Ürünler Excel formatında dışa aktarıldı.",
-        })
-      }
-    } finally {
-      setIsExcelLoading(false)
-    }
+    const header = ["Ürün Adı", "Açıklama", "Fiyat", "Kategori", "Tür", "Mevcut", "İndirim", "Stok", "Resim URL"]
+    const rows = products.map((product) => [
+      product.title,
+      product.description || "",
+      product.price,
+      product.category,
+      product.type,
+      product.available ? "Evet" : "Hayır",
+      product.discount || 0,
+      product.stock ?? "",
+      product.image || "",
+    ])
+    downloadCsv([header, ...rows], "menu-urunleri.csv")
+    setIsExcelLoading(false)
+    toast({ title: "Dışa aktarma tamamlandı", description: "Ürünler CSV formatında dışa aktarıldı." })
   }
 
   const downloadTemplate = () => {
-    try {
-      const templateData = [
-        {
-          "Ürün Adı": "Örnek Ürün",
-          Açıklama: "Bu bir örnek ürün açıklamasıdır",
-          Fiyat: 100,
-          Kategori: "Ana Yemek",
-          Tür: "Et",
-          Mevcut: "Evet",
-          İndirim: 0,
-          "Resim URL": "/placeholder.svg?height=160&width=320",
-        },
-      ]
-
-      const success = downloadExcelFile(templateData, "urun-import-sablonu.xlsx")
-
-      if (success) {
-        toast({
-          title: "Şablon indirildi",
-          description: "Excel şablonu başarıyla indirildi.",
-        })
-      }
-    } catch (error) {
-      console.error("Şablon indirme hatası:", error)
-      toast({
-        title: "Şablon indirme hatası",
-        description: "Excel şablonu oluşturulurken bir hata oluştu.",
-        variant: "destructive",
-      })
-    }
+    downloadCsv(
+      [
+        ["Ürün Adı", "Açıklama", "Fiyat", "Kategori", "Tür", "Mevcut", "İndirim", "Stok", "Resim URL"],
+        ["Örnek Ürün", "Örnek açıklama", 100, "Ana Yemek", "Et", "Evet", 0, 20, ""],
+      ],
+      "urun-import-sablonu.csv",
+    )
+    toast({ title: "Şablon indirildi", description: "CSV şablonu hazırlandı." })
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -475,8 +348,8 @@ export default function MenuPage() {
       return
     }
 
-    if (!file.name.endsWith(".xlsx") && !file.name.endsWith(".xls")) {
-      setImportError("Lütfen geçerli bir Excel dosyası (.xlsx veya .xls) seçin.")
+    if (!file.name.toLocaleLowerCase("tr-TR").endsWith(".csv")) {
+      setImportError("Lütfen geçerli bir CSV dosyası seçin.")
       setSelectedFile(null)
       return
     }
@@ -485,7 +358,7 @@ export default function MenuPage() {
     setImportStatus(`"${file.name}" dosyası seçildi. İçe aktarmak için "İçe Aktar" butonuna tıklayın.`)
   }
 
-  const processExcelFile = () => {
+  const processExcelFile = async () => {
     if (!selectedFile) {
       setImportError("Lütfen önce bir dosya seçin.")
       return
@@ -495,121 +368,56 @@ export default function MenuPage() {
     setImportError(null)
     setImportStatus("Dosya işleniyor...")
 
-    const reader = new FileReader()
+    try {
+      if (!user?.restaurant_id) throw new Error("Restoran üyeliği bulunamadı.")
+      const rows = parseCsv(await selectedFile.text())
+      if (rows.length < 2) throw new Error("CSV dosyasında ürün satırı bulunamadı.")
+      const headers = rows[0].map((header) => header.replace(/^\uFEFF/, "").trim())
+      const importedProducts: FoodItem[] = []
 
-    reader.onload = (evt) => {
-      try {
-        if (!window.XLSX) {
-          throw new Error("Excel kütüphanesi bulunamadı.")
+      for (const [index, cells] of rows.slice(1).entries()) {
+        const record = Object.fromEntries(headers.map((header, cellIndex) => [header, cells[cellIndex]?.trim() || ""]))
+        const price = Number(record["Fiyat"].replace(",", "."))
+        if (!record["Ürün Adı"] || !Number.isFinite(price) || price < 0) {
+          throw new Error(`${index + 2}. satırda ürün adı veya fiyat geçersiz.`)
         }
 
-        const XLSX = window.XLSX
-        const data = evt.target?.result
-
-        if (!data) {
-          throw new Error("Dosya içeriği okunamadı.")
-        }
-
-        const workbook = XLSX.read(data, { type: "binary" })
-
-        if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-          throw new Error("Excel dosyasında sayfa bulunamadı.")
-        }
-
-        const worksheetName = workbook.SheetNames[0]
-        const worksheet = workbook.Sheets[worksheetName]
-
-        if (!worksheet) {
-          throw new Error("Excel sayfası boş veya okunamadı.")
-        }
-
-        const jsonData = XLSX.utils.sheet_to_json(worksheet)
-
-        if (!Array.isArray(jsonData) || jsonData.length === 0) {
-          throw new Error("Excel dosyasında veri bulunamadı veya format uygun değil.")
-        }
-
-        const importedProducts: FoodItem[] = []
-
-        for (let i = 0; i < jsonData.length; i++) {
-          const row = jsonData[i]
-
-          try {
-            const product: FoodItem = {
-              id: Math.random().toString(36).substring(2, 9),
-              title: row["Ürün Adı"] || `Ürün ${i + 1}`,
-              description: row["Açıklama"] || "",
-              price: Number(row["Fiyat"]) || 0,
-              category: row["Kategori"] || "Diğer",
-              type: row["Tür"] === "Et" || row["Tür"] === "Vejeteryan" ? (row["Tür"] as "Et" | "Vejeteryan") : "Et",
-              available: row["Mevcut"] === "Evet",
-              discount: Number(row["İndirim"]) || 0,
-              image: row["Resim URL"] || "/placeholder.svg?height=160&width=320",
-            }
-
-            importedProducts.push(product)
-          } catch (error) {
-            console.error(`Satır ${i + 1} işlenirken hata:`, error)
-          }
-        }
-
-        if (importedProducts.length === 0) {
-          throw new Error("Hiçbir ürün içe aktarılamadı. Lütfen dosya formatını kontrol edin.")
-        }
-
-        setProducts((prevProducts) => [...prevProducts, ...importedProducts])
-
-        toast({
-          title: "İçe aktarma başarılı",
-          description: `${importedProducts.length} ürün başarıyla içe aktarıldı.`,
+        const created = await productsApi.create({
+          title: record["Ürün Adı"],
+          description: record["Açıklama"],
+          price,
+          image: record["Resim URL"] || undefined,
+          category: record["Kategori"] || "Diğer",
+          available: record["Mevcut"].toLocaleLowerCase("tr-TR") !== "hayır",
+          type: record["Tür"] === "Vejeteryan" ? "Vejeteryan" : "Et",
+          discount: Number(record["İndirim"].replace(",", ".")) || 0,
+          stock: record["Stok"] ? Number(record["Stok"].replace(",", ".")) : undefined,
+          restaurant_id: user.restaurant_id,
         })
-
-        setIsImportDialogOpen(false)
-      } catch (error: any) {
-        console.error("Excel içe aktarma hatası:", error)
-        setImportError(`Hata: ${error.message || "Excel dosyası işlenirken bir hata oluştu."}`)
-        setImportStatus(null)
-      } finally {
-        setIsExcelLoading(false)
+        if (created) importedProducts.push(created)
       }
-    }
 
-    reader.onerror = () => {
-      setIsExcelLoading(false)
-      setImportError("Dosya okunamadı. Lütfen dosyanın bozuk olmadığından emin olun.")
+      setProducts((current) => [...importedProducts, ...current])
+      toast({ title: "İçe aktarma tamamlandı", description: `${importedProducts.length} ürün veritabanına eklendi.` })
+      handleImportDialogChange(false)
+    } catch (cause) {
+      setImportError(cause instanceof Error ? cause.message : "CSV dosyası işlenemedi.")
       setImportStatus(null)
+    } finally {
+      setIsExcelLoading(false)
     }
-
-    reader.readAsBinaryString(selectedFile)
   }
 
   return (
     <div className="flex h-screen bg-gray-100">
-      <Script
-        src="https://cdn.sheetjs.com/xlsx-0.19.3/package/dist/xlsx.full.min.js"
-        onLoad={() => {
-          console.log("Excel kütüphanesi yüklendi")
-          setIsExcelScriptLoaded(true)
-        }}
-        onError={(e) => {
-          console.error("Excel kütüphanesi yüklenemedi:", e)
-          toast({
-            title: "Excel kütüphanesi yüklenemedi",
-            description: "Excel işlemleri kullanılamayabilir.",
-            variant: "destructive",
-          })
-        }}
-        strategy="lazyOnload"
-      />
-
       {showSidebar && <SidebarNav />}
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header showMobileMenu={!showSidebar} onMenuToggle={() => setShowSidebar(!showSidebar)} />
         <div className="flex-1 overflow-auto p-4">
           <div className="flex justify-between items-center mb-6">
-            <h1 className="text-2xl font-bold">Menü Yönetimi</h1>
+            <h1 className="text-2xl font-bold">{canManage ? "Menü Yönetimi" : "Menü"}</h1>
             <div className="flex gap-2">
-              {isBulkMode ? (
+              {canManage && isBulkMode ? (
                 <>
                   <Button variant="outline" onClick={toggleBulkMode} className="gap-2">
                     <X className="h-4 w-4" /> Toplu Modu Kapat
@@ -628,7 +436,7 @@ export default function MenuPage() {
                     Seçilenleri Sil ({selectedProducts.length})
                   </Button>
                 </>
-              ) : (
+              ) : canManage ? (
                 <>
                   <Button variant="outline" onClick={() => setIsImportDialogOpen(true)} className="gap-2">
                     <FileUp className="h-4 w-4" /> İçe Aktar
@@ -644,6 +452,11 @@ export default function MenuPage() {
                     <Plus className="h-4 w-4" /> Yeni Ürün
                   </Button>
                 </>
+              ) : (
+                <Button variant="outline" onClick={exportToExcel} className="gap-2" disabled={isExcelLoading}>
+                  <FileDown className="h-4 w-4" />
+                  {isExcelLoading ? "İşleniyor..." : "Dışa Aktar"}
+                </Button>
               )}
             </div>
           </div>
@@ -685,7 +498,7 @@ export default function MenuPage() {
                         >
                           <CardHeader className="pb-2">
                             <CardTitle className="text-lg">{item.title}</CardTitle>
-                            {isBulkMode && (
+                            {canManage && isBulkMode && (
                               <div className="absolute top-3 right-3 z-10">
                                 <Checkbox
                                   id={`select-${item.id}`}
@@ -698,7 +511,7 @@ export default function MenuPage() {
                           </CardHeader>
                           <CardContent className="pb-2">
                             <div className="aspect-w-4 aspect-h-3 mb-3 overflow-hidden rounded-md">
-                              <img
+                              <ProductImage
                                 src={item.image || "/placeholder.svg?height=160&width=320"}
                                 alt={item.title}
                                 className="object-cover w-full h-full"
@@ -713,14 +526,15 @@ export default function MenuPage() {
                               <p className="text-sm">
                                 <span className="font-medium">Tür:</span> {item.type}
                               </p>
-                              {item.discount > 0 && (
+                              {(item.discount ?? 0) > 0 && (
                                 <p className="text-sm text-orange-600">
                                   <span className="font-medium">İndirim:</span> %{item.discount}
                                 </p>
                               )}
                             </div>
                           </CardContent>
-                          <CardFooter className="flex justify-end gap-2">
+                          {canManage && (
+                            <CardFooter className="flex justify-end gap-2">
                             {!isBulkMode && (
                               <>
                                 <Button variant="outline" size="sm" onClick={() => handleEditItem(item.id)}>
@@ -736,7 +550,8 @@ export default function MenuPage() {
                                 </Button>
                               </>
                             )}
-                          </CardFooter>
+                            </CardFooter>
+                          )}
                         </Card>
                       ))}
                   </div>
@@ -744,29 +559,37 @@ export default function MenuPage() {
               ))}
             </Tabs>
           ) : (
-            <EmptyState type="products" onAction={handleAddItem} actionLabel="İlk Ürünü Ekle" />
+            <EmptyState
+              type="products"
+              onAction={canManage ? handleAddItem : undefined}
+              actionLabel={canManage ? "İlk Ürünü Ekle" : undefined}
+            />
           )}
         </div>
       </div>
 
-      <ProductForm open={isAddProductOpen} onOpenChange={setIsAddProductOpen} onSave={handleSaveProduct} />
+      {canManage && isAddProductOpen && (
+        <ProductForm open={isAddProductOpen} onOpenChange={setIsAddProductOpen} onSave={handleSaveProduct} />
+      )}
 
-      <ProductForm
-        open={isEditProductOpen}
-        onOpenChange={setIsEditProductOpen}
-        initialData={currentProduct}
-        onSave={handleSaveProduct}
-      />
+      {canManage && isEditProductOpen && (
+        <ProductForm
+          open={isEditProductOpen}
+          onOpenChange={setIsEditProductOpen}
+          initialData={currentProduct}
+          onSave={handleSaveProduct}
+        />
+      )}
 
-      <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+      <Dialog open={canManage && isImportDialogOpen} onOpenChange={handleImportDialogChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Excel'den Ürün İçe Aktar</DialogTitle>
+            <DialogTitle>CSV ile Ürün İçe Aktar</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="flex flex-col gap-2">
               <p className="text-sm text-muted-foreground">
-                Excel dosyanızı yükleyin veya şablonu indirin ve doldurun.
+                CSV dosyanızı yükleyin veya şablonu indirip doldurun.
               </p>
               <Button variant="outline" onClick={downloadTemplate} className="gap-2">
                 <Download className="h-4 w-4" /> Şablonu İndir
@@ -774,11 +597,11 @@ export default function MenuPage() {
             </div>
 
             <div className="grid w-full max-w-sm items-center gap-1.5">
-              <Label htmlFor="excel-file">Excel Dosyası</Label>
+              <Label htmlFor="excel-file">CSV Dosyası</Label>
               <Input
                 id="excel-file"
                 type="file"
-                accept=".xlsx, .xls"
+                accept=".csv,text/csv"
                 onChange={handleFileSelect}
                 ref={fileInputRef}
                 disabled={isExcelLoading}
@@ -803,14 +626,14 @@ export default function MenuPage() {
               <h4 className="text-sm font-medium text-amber-800 mb-1">Önemli Notlar:</h4>
               <ul className="text-xs text-amber-700 list-disc pl-4 space-y-1">
                 <li>Şablondaki tüm sütunları doldurun</li>
-                <li>Tür sütunu için "Et" veya "Vejeteryan" değerlerini kullanın</li>
-                <li>Mevcut sütunu için "Evet" veya "Hayır" değerlerini kullanın</li>
+                <li>Tür sütunu için Et veya Vejeteryan değerlerini kullanın</li>
+                <li>Mevcut sütunu için Evet veya Hayır değerlerini kullanın</li>
                 <li>Fiyat ve İndirim sütunları sayısal değer olmalıdır</li>
               </ul>
             </div>
           </div>
           <DialogFooter className="flex flex-col sm:flex-row gap-2">
-            <Button variant="outline" onClick={() => setIsImportDialogOpen(false)} className="w-full sm:w-auto">
+            <Button variant="outline" onClick={() => handleImportDialogChange(false)} className="w-full sm:w-auto">
               İptal
             </Button>
             <Button

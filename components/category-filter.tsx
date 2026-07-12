@@ -8,6 +8,8 @@ import { Coffee, Soup, UtensilsCrossed, ChefHat, Sandwich, Search, Pizza, Salad,
 import { productsApi } from "@/lib/api"
 
 interface CategoryFilterProps {
+  categories?: string[]
+  selectedCategory?: string
   onCategoryChange: (category: string) => void
 }
 
@@ -23,14 +25,13 @@ const iconMap: Record<string, React.ReactNode> = {
   IceCream: <IceCream className="h-5 w-5" />,
 }
 
-export function CategoryFilter({ onCategoryChange }: CategoryFilterProps) {
-  const [selectedCategory, setSelectedCategory] = useState("Tümü")
-  const [searchVisible, setSearchVisible] = useState(false)
-  const [searchQuery, setSearchQuery] = useState("")
+export function CategoryFilter({ categories: categoryNames, selectedCategory, onCategoryChange }: CategoryFilterProps) {
+  const [internalSelectedCategory, setInternalSelectedCategory] = useState("Tümü")
   const [categories, setCategories] = useState<Array<{ icon: string; label: string; items: number }>>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!categoryNames)
 
   useEffect(() => {
+    if (categoryNames) return
     const loadCategories = async () => {
       try {
         // API'den ürünleri yükle ve kategorileri hesapla
@@ -70,12 +71,17 @@ export function CategoryFilter({ onCategoryChange }: CategoryFilterProps) {
     }
 
     loadCategories()
-  }, [])
+  }, [categoryNames])
 
   const handleCategoryClick = (category: string) => {
-    setSelectedCategory(category)
+    setInternalSelectedCategory(category)
     onCategoryChange(category)
   }
+
+  const currentSelectedCategory = selectedCategory ?? internalSelectedCategory
+  const displayedCategories = categoryNames
+    ? categoryNames.map((label) => ({ icon: label === "Tümü" ? "Search" : "ChefHat", label, items: 0 }))
+    : categories
 
   if (loading) {
     return (
@@ -100,16 +106,12 @@ export function CategoryFilter({ onCategoryChange }: CategoryFilterProps) {
     <div className="mb-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold">Kategoriler</h2>
-        <Button variant="ghost" size="sm" onClick={() => setSearchVisible(!searchVisible)}>
-          <Search className="h-4 w-4 mr-1" />
-          Ara
-        </Button>
       </div>
 
       <ScrollArea className="w-full whitespace-nowrap">
         <div className="flex space-x-2 pb-2">
-          {categories.map((category) => {
-            const isSelected = selectedCategory === category.label
+          {displayedCategories.map((category) => {
+            const isSelected = currentSelectedCategory === category.label
             return (
               <Button
                 key={category.label}

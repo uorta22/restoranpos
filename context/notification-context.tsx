@@ -1,131 +1,128 @@
 "use client"
 
-import type React from "react"
-import { createContext, useContext, useState, useEffect } from "react"
-import { v4 as uuidv4 } from "uuid"
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
+import { notificationsApi, type AppNotification } from "@/lib/api"
+import { getClientSupabaseInstance } from "@/lib/supabase"
+import { useAuth } from "@/context/auth-context"
 
-// Notification type definition
-export interface Notification {
-  id: string
-  title: string
-  message: string
-  type: "info" | "success" | "warning" | "error"
-  read: boolean
-  timestamp: Date
-}
+export type Notification = AppNotification
 
 interface NotificationContextType {
-  // Browser notification functions
   showNotification: (title: string, options?: NotificationOptions) => void
   requestPermission: () => Promise<NotificationPermission>
   notificationPermission: NotificationPermission | null
-
-  // App notification functions
   notifications: Notification[]
-  addNotification: (notification: Omit<Notification, "id" | "read" | "timestamp">) => void
-  markAsRead: (id: string) => void
-  markAllAsRead: () => void
-  removeNotification: (id: string) => void
-  clearNotifications: () => void
+  addNotification: (
+    notification: Pick<Notification, "title" | "message" | "type"> & {
+      targetUserId?: string
+      relatedOrderId?: string
+    },
+  ) => Promise<Notification | null>
+  markAsRead: (id: string) => Promise<void>
+  markAllAsRead: () => Promise<void>
+  removeNotification: (id: string) => Promise<void>
+  clearNotifications: () => Promise<void>
   unreadCount: number
 }
 
-const defaultContext: NotificationContextType = {
-  showNotification: () => {},
-  requestPermission: async () => "default",
-  notificationPermission: null,
-  notifications: [],
-  addNotification: () => {},
-  markAsRead: () => {},
-  markAllAsRead: () => {},
-  removeNotification: () => {},
-  clearNotifications: () => {},
-  unreadCount: 0,
-}
+const NotificationContext = createContext<NotificationContextType | undefined>(undefined)
 
-const NotificationContext = createContext<NotificationContextType>(defaultContext)
-
-export function NotificationProvider({ children }: { children: React.ReactNode }) {
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | null>(null)
+export function NotificationProvider({ children }: { children: ReactNode }) {
+  const { user, isLoading: isAuthLoading } = useAuth()
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | null>(() =>
+    typeof window !== "undefined" && "Notification" in window ? window.Notification.permission : null,
+  )
   const [notifications, setNotifications] = useState<Notification[]>([])
 
-  // Check notification permission on mount
-  useEffect(() => {
-    if (typeof window !== "undefined" && "Notification" in window) {
-      setNotificationPermission(Notification.permission)
-    }
-  }, [])
-
-  // Request notification permission
-  const requestPermission = async () => {
-    if (typeof window === "undefined" || !("Notification" in window)) {
-      return "denied" as NotificationPermission
-    }
-
-    try {
-      const permission = await Notification.requestPermission()
-      setNotificationPermission(permission)
-      return permission
-    } catch (error) {
-      console.error("Error requesting notification permission:", error)
-      return "denied" as NotificationPermission
-    }
-  }
-
-  // Show browser notification
-  const showNotification = (title: string, options?: NotificationOptions) => {
-    if (typeof window === "undefined" || !("Notification" in window) || notificationPermission !== "granted") {
+  const refreshNotifications = useCallback(async () => {
+    if (!user?.restaurant_id) {
+      setNotifications([])
       return
     }
-
     try {
-      new Notification(title, options)
-    } catch (error) {
-      console.error("Error showing notification:", error)
+      setNotifications(await notificationsApi.getAll())
+    } catch {
+      setNotifications([])
+    }
+  }, [user?.restaurant_id])
+
+  useEffect(() => {
+    if (isAuthLoading) return
+    const timeoutId = window.setTimeout(() => void refreshNotifications(), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [isAuthLoading, refreshNotifications])
+
+  useEffect(() => {
+    if (!user?.restaurant_id || !user.id) return
+    const supabase = getClientSupabaseInstance()
+    const channel = supabase
+      .channel(`notifications:${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "notifications", filter: `user_id=eq.${user.id}` },
+        () => void refreshNotifications(),
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [refreshNotifications, user?.id, user?.restaurant_id])
+
+  const requestPermission = async () => {
+    if (!("Notification" in window)) return "denied" as NotificationPermission
+    try {
+      const permission = await window.Notification.requestPermission()
+      setNotificationPermission(permission)
+      return permission
+    } catch {
+      return "denied" as NotificationPermission
     }
   }
 
-  // Add notification to the app
-  const addNotification = (notification: Omit<Notification, "id" | "read" | "timestamp">) => {
-    const newNotification: Notification = {
-      ...notification,
-      id: uuidv4(),
-      read: false,
-      timestamp: new Date(),
-    }
-
-    setNotifications((prev) => [newNotification, ...prev])
-
-    // Also show browser notification if permission granted
-    if (notificationPermission === "granted") {
-      showNotification(notification.title, { body: notification.message })
+  const showNotification = (title: string, options?: NotificationOptions) => {
+    if (!("Notification" in window) || notificationPermission !== "granted") return
+    try {
+      new window.Notification(title, options)
+    } catch {
+      // Some browsers expose the permission API without supporting the constructor.
     }
   }
 
-  // Mark notification as read
-  const markAsRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((notification) => (notification.id === id ? { ...notification, read: true } : notification)),
+  const addNotification: NotificationContextType["addNotification"] = async (notification) => {
+    try {
+      const created = await notificationsApi.create(notification)
+      setNotifications((current) => [created, ...current])
+      if (notificationPermission === "granted") {
+        showNotification(notification.title, { body: notification.message })
+      }
+      return created
+    } catch {
+      return null
+    }
+  }
+
+  const markAsRead = async (id: string) => {
+    await notificationsApi.markAsRead(id)
+    setNotifications((current) =>
+      current.map((notification) => (notification.id === id ? { ...notification, read: true } : notification)),
     )
   }
 
-  // Mark all notifications as read
-  const markAllAsRead = () => {
-    setNotifications((prev) => prev.map((notification) => ({ ...notification, read: true })))
+  const markAllAsRead = async () => {
+    await notificationsApi.markAllAsRead()
+    setNotifications((current) => current.map((notification) => ({ ...notification, read: true })))
   }
 
-  // Remove notification
-  const removeNotification = (id: string) => {
-    setNotifications((prev) => prev.filter((notification) => notification.id !== id))
+  const removeNotification = async (id: string) => {
+    await notificationsApi.remove(id)
+    setNotifications((current) => current.filter((notification) => notification.id !== id))
   }
 
-  // Clear all notifications
-  const clearNotifications = () => {
+  const clearNotifications = async () => {
+    await notificationsApi.clear()
     setNotifications([])
   }
-
-  // Calculate unread count
-  const unreadCount = notifications.filter((notification) => !notification.read).length
 
   return (
     <NotificationContext.Provider
@@ -139,7 +136,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         markAllAsRead,
         removeNotification,
         clearNotifications,
-        unreadCount,
+        unreadCount: notifications.filter((notification) => !notification.read).length,
       }}
     >
       {children}
@@ -147,13 +144,10 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   )
 }
 
-export const useNotification = () => {
+export function useNotification() {
   const context = useContext(NotificationContext)
-  if (!context) {
-    throw new Error("useNotification must be used within a NotificationProvider")
-  }
+  if (!context) throw new Error("useNotification must be used within a NotificationProvider")
   return context
 }
 
-// For backward compatibility
 export const useNotificationContext = useNotification

@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation"
 import { EmptyState } from "@/components/empty-state"
 import { useOrderContext } from "@/context/order-context"
 import { formatCurrency } from "@/lib/utils"
-import { TrendingUp, DollarSign, ShoppingBag, Users, Clock } from "lucide-react"
+import { CheckCircle2, Clock, DollarSign, Package, ShoppingBag, TrendingUp } from "lucide-react"
 
 export default function ReportsPage() {
   const { user, isLoading } = useAuth()
@@ -68,10 +68,28 @@ export default function ReportsPage() {
   }
 
   // Rapor hesaplamaları
-  const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0)
+  const paidOrders = orders.filter((order) => order.paymentStatus === "Ödendi")
+  const totalRevenue = paidOrders.reduce((sum, order) => sum + order.total, 0)
   const totalOrders = orders.length
   const completedOrders = orders.filter((order) => order.status === "Tamamlandı").length
-  const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
+  const averageOrderValue = paidOrders.length > 0 ? totalRevenue / paidOrders.length : 0
+  const productTotals = new Map<string, { name: string; quantity: number; revenue: number }>()
+
+  for (const order of paidOrders) {
+    for (const item of order.items) {
+      const current = productTotals.get(item.foodItem.id) ?? {
+        name: item.foodItem.title,
+        quantity: 0,
+        revenue: 0,
+      }
+      const netUnitPrice = item.foodItem.price * (1 - (item.foodItem.discount ?? 0) / 100)
+      current.quantity += item.quantity
+      current.revenue += netUnitPrice * item.quantity
+      productTotals.set(item.foodItem.id, current)
+    }
+  }
+
+  const productSales = [...productTotals.values()].sort((left, right) => right.quantity - left.quantity)
 
   return (
     <div className="flex h-screen bg-gray-100">
@@ -101,7 +119,7 @@ export default function ReportsPage() {
                     <div className="text-2xl font-bold">{formatCurrency(totalRevenue)}</div>
                     <p className="text-xs text-muted-foreground">
                       <TrendingUp className="inline h-3 w-3 mr-1" />
-                      Toplam satış
+                      Ödemesi alınan satışlar
                     </p>
                   </CardContent>
                 </Card>
@@ -120,7 +138,7 @@ export default function ReportsPage() {
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-sm font-medium">Tamamlanan</CardTitle>
-                    <Users className="h-4 w-4 text-muted-foreground" />
+                    <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">{completedOrders}</div>
@@ -135,7 +153,7 @@ export default function ReportsPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">{formatCurrency(averageOrderValue)}</div>
-                    <p className="text-xs text-muted-foreground">Sipariş başına</p>
+                    <p className="text-xs text-muted-foreground">Ödenen sipariş başına</p>
                   </CardContent>
                 </Card>
               </div>
@@ -158,7 +176,7 @@ export default function ReportsPage() {
                         </div>
                         <div className="text-right">
                           <p className="font-bold">{formatCurrency(order.total)}</p>
-                          <p className="text-sm text-gray-500">{order.status}</p>
+                          <p className="text-sm text-gray-500">{order.status} · {order.paymentStatus}</p>
                         </div>
                       </div>
                     ))}
@@ -173,7 +191,24 @@ export default function ReportsPage() {
                   <CardTitle>Ürün Analizi</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-gray-500">Ürün satış analizleri burada görünecek.</p>
+                  {productSales.length ? (
+                    <div className="space-y-3">
+                      {productSales.map((product, index) => (
+                        <div key={`${product.name}:${index}`} className="flex items-center justify-between gap-4 border-b py-3 last:border-0">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <Package className="h-4 w-4 shrink-0 text-orange-600" aria-hidden="true" />
+                            <div className="min-w-0">
+                              <p className="truncate font-medium text-gray-950">{product.name}</p>
+                              <p className="text-sm text-gray-500">{product.quantity} adet</p>
+                            </div>
+                          </div>
+                          <p className="font-semibold">{formatCurrency(product.revenue)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">Ürün analizi için ödemesi alınmış sipariş bulunmuyor.</p>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>

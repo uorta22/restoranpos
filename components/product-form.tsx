@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -23,37 +23,21 @@ export function ProductForm({ open, onOpenChange, initialData, onSave }: Product
   const { toast } = useToast()
   const isEditing = !!initialData
 
-  const [formData, setFormData] = useState<FoodItem>({
-    id: "",
-    title: "",
-    description: "",
-    price: 0,
-    image: "/placeholder.svg?height=160&width=320",
-    category: "",
-    available: true,
-    type: "Et",
-    discount: 0,
-  })
-
-  // Update form data when initialData changes or dialog opens
-  useEffect(() => {
-    if (initialData && open) {
-      setFormData({ ...initialData })
-    } else if (!initialData && open) {
-      // Reset form for new product
-      setFormData({
-        id: Math.random().toString(36).substring(2, 9),
-        title: "",
-        description: "",
-        price: 0,
-        image: "/placeholder.svg?height=160&width=320",
-        category: "",
-        available: true,
-        type: "Et",
-        discount: 0,
-      })
-    }
-  }, [initialData, open])
+  const [formData, setFormData] = useState<FoodItem>(() =>
+    initialData
+      ? { ...initialData }
+      : {
+          id: "",
+          title: "",
+          description: "",
+          price: 0,
+          image: "/placeholder.svg?height=160&width=320",
+          category: "",
+          available: true,
+          type: "Et",
+          discount: 0,
+        },
+  )
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target

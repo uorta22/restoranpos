@@ -6,9 +6,7 @@ export const FEATURES = [
   { id: "reports", name: "Raporlar" },
   { id: "inventory", name: "Stok takibi" },
   { id: "analytics", name: "Gelişmiş analitik" },
-  { id: "marketing", name: "Pazarlama araçları" },
   { id: "delivery", name: "Kurye ve teslimat" },
-  { id: "loyalty", name: "Sadakat programı" },
 ]
 
 export const PLANS = [
@@ -39,9 +37,7 @@ export const PLANS = [
       "reports",
       "inventory",
       "analytics",
-      "marketing",
       "delivery",
-      "loyalty",
     ],
   },
 ]

@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,6 +14,8 @@ import { useToast } from "@/hooks/use-toast"
 import { MapPin, Phone, User, Home, CreditCard, Banknote } from "lucide-react"
 import { CustomerTrackingLink } from "@/components/customer-tracking-link"
 import { Badge } from "@/components/ui/badge"
+import { calculateOrderTotals, formatCurrency, getDiscountedPrice } from "@/lib/utils"
+import { useRestaurantTaxRate } from "@/hooks/use-restaurant-tax-rate"
 
 interface DeliveryFormProps {
   onClose: () => void
@@ -23,9 +25,11 @@ export function DeliveryForm({ onClose }: DeliveryFormProps) {
   const { items, clearCart } = useCart()
   const { createOrder } = useOrderContext()
   const { toast } = useToast()
+  const taxRate = useRestaurantTaxRate()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showTrackingLink, setShowTrackingLink] = useState(false)
   const [orderId, setOrderId] = useState<string | null>(null)
+  const [trackingToken, setTrackingToken] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
@@ -37,29 +41,15 @@ export function DeliveryForm({ onClose }: DeliveryFormProps) {
   const [selectedMealCard, setSelectedMealCard] = useState<string | null>(null)
   const [isMealCardDialogOpen, setIsMealCardDialogOpen] = useState(false)
 
-  const mealCardOptions = [
+  const mealCardOptions = useMemo(() => [
     { id: "sodexo", name: "Sodexo", logo: "/images/sodexo-logo.png" },
     { id: "multinet", name: "Multinet", logo: "/images/multinet-logo.png" },
     { id: "ticket", name: "Ticket Restaurant", logo: "/images/ticket-logo.png" },
     { id: "setcard", name: "SetCard", logo: "/images/setcard-logo.png" },
     { id: "metropol", name: "MetropolCard", logo: "/images/metropol-logo.png" },
     { id: "paye", name: "Paye Kart", logo: "/images/paye-logo.png" },
-  ]
-
-  // Calculate total with validation
-  const calculateTotal = () => {
-    if (!items || items.length === 0) return 0
-
-    const total = items.reduce((sum, item) => {
-      const itemPrice = item?.foodItem?.price || 0
-      const quantity = item?.quantity || 0
-      return sum + itemPrice * quantity
-    }, 0)
-
-    return Math.max(0, total) // Ensure non-negative
-  }
-
-  const orderTotal = calculateTotal()
+  ], [])
+  const orderTotals = calculateOrderTotals(items, taxRate)
 
   const handleMealCardSelect = (cardId: string) => {
     setSelectedMealCard(cardId)
@@ -101,7 +91,16 @@ export function DeliveryForm({ onClose }: DeliveryFormProps) {
       return
     }
 
-    if (orderTotal <= 0) {
+    if (!paymentMethod || (paymentMethod === "Yemek Param" && !selectedMealCard)) {
+      toast({
+        title: "Ödeme yöntemi gerekli",
+        description: "Teslimatta kullanılacak ödeme yöntemini seçin.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (orderTotals.total <= 0) {
       toast({
         title: "Geçersiz tutar",
         description: "Sipariş tutarı geçerli değil",
@@ -119,26 +118,15 @@ export function DeliveryForm({ onClose }: DeliveryFormProps) {
     }
 
     try {
-      console.log("Creating order with data:", {
-        items,
-        total: orderTotal,
-        customerName: formData.name,
-        notes: orderNotesWithPayment,
-        isDelivery: true,
-        deliveryAddress: {
-          address: formData.address,
-          phone: formData.phone,
-          customerName: formData.name,
-        },
-      })
-
       const order = await createOrder({
         items,
-        total: orderTotal,
+        total: orderTotals.total,
         customerName: formData.name,
         notes: orderNotesWithPayment,
         tableId: null,
         isDelivery: true,
+        paymentMethod,
+        payNow: false,
         deliveryAddress: {
           address: formData.address,
           phone: formData.phone,
@@ -149,6 +137,7 @@ export function DeliveryForm({ onClose }: DeliveryFormProps) {
       if (order) {
         clearCart()
         setOrderId(order.id)
+        setTrackingToken(order.deliveryTrackingToken ?? null)
         setShowTrackingLink(true)
 
         toast({
@@ -189,12 +178,20 @@ export function DeliveryForm({ onClose }: DeliveryFormProps) {
                   <span>
                     {item.quantity}x {item.foodItem.title}
                   </span>
-                  <span>{(item.quantity * item.foodItem.price).toFixed(2)} ₺</span>
+                  <span>{formatCurrency(item.quantity * getDiscountedPrice(item.foodItem))}</span>
                 </div>
               ))}
               <div className="border-t pt-1 font-medium flex justify-between">
+                <span>Vergi öncesi:</span>
+                <span>{formatCurrency(orderTotals.netSubtotal)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>KDV (%{taxRate}):</span>
+                <span>{formatCurrency(orderTotals.tax)}</span>
+              </div>
+              <div className="flex justify-between font-medium">
                 <span>Toplam:</span>
-                <span>{orderTotal.toFixed(2)} ₺</span>
+                <span>{formatCurrency(orderTotals.total)}</span>
               </div>
             </div>
           </div>
@@ -303,8 +300,11 @@ export function DeliveryForm({ onClose }: DeliveryFormProps) {
             <Button type="button" variant="outline" onClick={onClose}>
               İptal
             </Button>
-            <Button type="submit" disabled={isSubmitting || orderTotal <= 0}>
-              {isSubmitting ? "Gönderiliyor..." : `Siparişi Tamamla (${orderTotal.toFixed(2)} ₺)`}
+            <Button
+              type="submit"
+              disabled={isSubmitting || orderTotals.total <= 0 || !paymentMethod || (paymentMethod === "Yemek Param" && !selectedMealCard)}
+            >
+              {isSubmitting ? "Gönderiliyor..." : `Siparişi Tamamla (${formatCurrency(orderTotals.total)})`}
             </Button>
           </DialogFooter>
         </form>
@@ -317,7 +317,7 @@ export function DeliveryForm({ onClose }: DeliveryFormProps) {
             <p className="text-sm text-gray-500">Siparişinizi aşağıdaki bağlantıdan takip edebilirsiniz.</p>
           </div>
 
-          {orderId && <CustomerTrackingLink orderId={orderId} />}
+          {trackingToken && <CustomerTrackingLink trackingToken={trackingToken} />}
 
           <div className="mt-6 text-center">
             <Button onClick={onClose}>Kapat</Button>
@@ -339,7 +339,7 @@ export function DeliveryForm({ onClose }: DeliveryFormProps) {
                 className="h-24 flex flex-col items-center justify-center gap-2"
                 onClick={() => handleMealCardSelect(card.id)}
               >
-                <img src={card.logo || "/placeholder.svg"} alt={card.name} className="h-10 object-contain" />
+                <CreditCard className="h-6 w-6" aria-hidden="true" />
                 <span>{card.name}</span>
               </Button>
             ))}

@@ -1,186 +1,263 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
-import { useLocalStorage } from "@/hooks/use-local-storage"
-import { useToast } from "@/hooks/use-toast"
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import type { SupabaseClient, User as SupabaseUser, UserAttributes } from "@supabase/supabase-js"
+import type { Database, MemberRole } from "@/lib/database.types"
+import { getClientSupabaseInstance } from "@/lib/supabase"
 
-// Define user type
 export interface User {
   id: string
   name: string
   email: string
   role: "Yönetici" | "Garson" | "Şef" | "Kasiyer" | "Kurye"
+  memberRole?: MemberRole
   avatar?: string
-  restaurant_id?: string // Add restaurant_id
+  restaurant_id?: string
 }
 
-// Define auth context type
+interface AuthResult {
+  success: boolean
+  message?: string
+  needsOnboarding?: boolean
+  requiresEmailConfirmation?: boolean
+}
+
 interface AuthContextType {
   user: User | null
   isLoading: boolean
-  login: (email: string, password: string) => Promise<{ success: boolean; message?: string }>
-  logout: () => void
-  register: (
+  login: (email: string, password: string) => Promise<AuthResult>
+  logout: () => Promise<void>
+  register: (name: string, email: string, password: string, role: string, redirectPath?: string) => Promise<AuthResult>
+  updateProfile: (data: Partial<User>) => Promise<AuthResult>
+  refreshUser: () => Promise<User | null>
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined)
+
+const roleLabels: Record<MemberRole, User["role"]> = {
+  owner: "Yönetici",
+  manager: "Yönetici",
+  waiter: "Garson",
+  kitchen: "Şef",
+  cashier: "Kasiyer",
+  courier: "Kurye",
+}
+
+async function hydrateUser(supabase: SupabaseClient<Database>, authUser: SupabaseUser): Promise<User> {
+  const [profileResult, membershipResult] = await Promise.all([
+    supabase.from("profiles").select("full_name, avatar_url").eq("id", authUser.id).maybeSingle(),
+    supabase
+      .from("restaurant_members")
+      .select("restaurant_id, role")
+      .eq("user_id", authUser.id)
+      .eq("status", "active")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ])
+
+  if (profileResult.error) throw new Error(`Profil okunamadı: ${profileResult.error.message}`)
+  if (membershipResult.error) throw new Error(`Restoran üyeliği okunamadı: ${membershipResult.error.message}`)
+
+  const metadataName = authUser.user_metadata?.full_name
+  const name =
+    profileResult.data?.full_name?.trim() ||
+    (typeof metadataName === "string" && metadataName.trim()) ||
+    authUser.email ||
+    "Kullanıcı"
+  const memberRole = membershipResult.data?.role
+
+  return {
+    id: authUser.id,
+    name,
+    email: authUser.email || "",
+    role: memberRole ? roleLabels[memberRole] : "Yönetici",
+    memberRole,
+    avatar: profileResult.data?.avatar_url ?? undefined,
+    restaurant_id: membershipResult.data?.restaurant_id,
+  }
+}
+
+function getAuthMessage(message: string) {
+  if (message.includes("Invalid login credentials")) return "E-posta veya şifre hatalı"
+  if (message.includes("Email not confirmed")) return "Giriş yapmadan önce e-posta adresinizi doğrulayın"
+  if (message.includes("already registered")) return "Bu e-posta adresi zaten kullanılıyor"
+  if (message.includes("Password should be")) return "Şifre güvenlik gereksinimlerini karşılamıyor"
+  return "Kimlik doğrulama işlemi tamamlanamadı"
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  const refreshUser = async () => {
+    const supabase = getClientSupabaseInstance()
+    const {
+      data: { user: authUser },
+      error,
+    } = await supabase.auth.getUser()
+
+    if (error || !authUser) {
+      setUser(null)
+      return null
+    }
+
+    const appUser = await hydrateUser(supabase, authUser)
+    setUser(appUser)
+    return appUser
+  }
+
+  useEffect(() => {
+    const supabase = getClientSupabaseInstance()
+    let active = true
+    let hydrationSequence = 0
+
+    const applyAuthUser = async (authUser: SupabaseUser | null) => {
+      const sequence = ++hydrationSequence
+      try {
+        const appUser = authUser ? await hydrateUser(supabase, authUser) : null
+        if (active && sequence === hydrationSequence) setUser(appUser)
+      } catch {
+        if (active && sequence === hydrationSequence) setUser(null)
+      } finally {
+        if (active && sequence === hydrationSequence) setIsLoading(false)
+      }
+    }
+
+    void supabase.auth.getUser().then(({ data }) => applyAuthUser(data.user))
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      window.setTimeout(() => void applyAuthUser(session?.user ?? null), 0)
+    })
+
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  const login = async (email: string, password: string): Promise<AuthResult> => {
+    setIsLoading(true)
+    const supabase = getClientSupabaseInstance()
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+
+    if (error) {
+      setIsLoading(false)
+      return { success: false, message: getAuthMessage(error.message) }
+    }
+
+    const appUser = data.user ? await hydrateUser(supabase, data.user) : null
+    setUser(appUser)
+    setIsLoading(false)
+    return { success: true, needsOnboarding: !appUser?.restaurant_id }
+  }
+
+  const logout = async () => {
+    const supabase = getClientSupabaseInstance()
+    await supabase.auth.signOut()
+    setUser(null)
+  }
+
+  const register = async (
     name: string,
     email: string,
     password: string,
     role: string,
-  ) => Promise<{ success: boolean; message?: string }>
-  updateProfile: (data: Partial<User>) => Promise<{ success: boolean; message?: string }>
-}
+    redirectPath?: string,
+  ): Promise<AuthResult> => {
+    setIsLoading(true)
+    void role
+    const supabase = getClientSupabaseInstance()
+    const safeRedirectPath = redirectPath?.startsWith("/") && !redirectPath.startsWith("//")
+      ? redirectPath
+      : "/onboarding"
+    const confirmationUrl = new URL("/auth/confirm", window.location.origin)
+    confirmationUrl.searchParams.set("next", safeRedirectPath)
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name: name.trim() },
+        emailRedirectTo: confirmationUrl.toString(),
+      },
+    })
 
-// Create auth context
-const AuthContext = createContext<AuthContextType | undefined>(undefined)
-
-// Mock user data for demo purposes
-const mockUsers = [
-  {
-    id: "1",
-    name: "Admin User",
-    email: "admin@example.com",
-    password: "password123",
-    role: "Yönetici" as const,
-    avatar: "/abstract-admin-interface.png",
-    restaurant_id: "mock-restaurant-1", // Add mock restaurant_id
-  },
-  {
-    id: "2",
-    name: "Waiter User",
-    email: "waiter@example.com",
-    password: "password123",
-    role: "Garson" as const,
-    avatar: "/friendly-cafe-server.png",
-    restaurant_id: "mock-restaurant-1", // Add mock restaurant_id
-  },
-]
-
-// Auth provider component
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useLocalStorage<User | null>("restaurant-pos-user", null)
-  const [isLoading, setIsLoading] = useState(true)
-  const { toast } = useToast()
-
-  // Check if user is logged in on mount
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        // In a real app, you would verify the token with your backend
-        const token = localStorage.getItem("auth_token")
-        if (token && !user) {
-          // For demo purposes, we'll just set a mock user
-          setUser(mockUsers[0])
-        }
-      } catch (error) {
-        console.error("Auth check error:", error)
-      } finally {
-        setIsLoading(false)
-      }
+    if (error) {
+      setIsLoading(false)
+      return { success: false, message: getAuthMessage(error.message) }
     }
 
-    checkAuth()
-  }, [setUser, user])
-
-  // Login function
-  const login = async (email: string, password: string) => {
-    try {
-      setIsLoading(true)
-
-      // In a real app, you would call your API here
-      // For demo purposes, we'll just check against mock users
-      const foundUser = mockUsers.find((u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password)
-
-      if (foundUser) {
-        const { password: _, ...userWithoutPassword } = foundUser
-        setUser(userWithoutPassword)
-
-        // Store token in localStorage (in a real app, this would be a JWT)
-        localStorage.setItem("auth_token", "mock-token-" + Date.now())
-
-        return { success: true }
-      }
-
-      return { success: false, message: "E-posta veya şifre hatalı" }
-    } catch (error) {
-      console.error("Login error:", error)
-      return { success: false, message: "Giriş sırasında bir hata oluştu" }
-    } finally {
-      setIsLoading(false)
+    const appUser = data.session && data.user ? await hydrateUser(supabase, data.user) : null
+    setUser(appUser)
+    setIsLoading(false)
+    return {
+      success: true,
+      needsOnboarding: Boolean(appUser && !appUser.restaurant_id),
+      requiresEmailConfirmation: !data.session,
     }
   }
 
-  // Logout function
-  const logout = () => {
-    setUser(null)
-    localStorage.removeItem("auth_token")
-  }
+  const updateProfile = async (data: Partial<User>): Promise<AuthResult> => {
+    if (!user) return { success: false, message: "Kullanıcı oturumu bulunamadı" }
 
-  // Register function
-  const register = async (name: string, email: string, password: string, role: string) => {
-    try {
-      setIsLoading(true)
-
-      // In a real app, you would call your API here
-      // For demo purposes, we'll just check if the email is already used
-      const existingUser = mockUsers.find((u) => u.email.toLowerCase() === email.toLowerCase())
-
-      if (existingUser) {
-        return { success: false, message: "Bu e-posta adresi zaten kullanılıyor" }
-      }
-
-      // In a real app, you would create the user in your database
-      // For demo purposes, we'll just return success
-      return { success: true }
-    } catch (error) {
-      console.error("Register error:", error)
-      return { success: false, message: "Kayıt sırasında bir hata oluştu" }
-    } finally {
-      setIsLoading(false)
+    const fullName = (data.name ?? user.name).trim()
+    const normalizedEmail = (data.email ?? user.email).trim().toLowerCase()
+    const avatarUrl = (data.avatar ?? user.avatar ?? "").trim()
+    if (fullName.length < 2) return { success: false, message: "Ad soyad en az iki karakter olmalıdır" }
+    if (!normalizedEmail || !normalizedEmail.includes("@")) {
+      return { success: false, message: "Geçerli bir e-posta adresi girin" }
     }
-  }
-
-  // Update profile function
-  const updateProfile = async (data: Partial<User>) => {
-    try {
-      setIsLoading(true)
-
-      if (!user) {
-        return { success: false, message: "Kullanıcı oturumu bulunamadı" }
-      }
-
-      // In a real app, you would call your API here
-      // For demo purposes, we'll just update the local user
-      setUser({ ...user, ...data })
-
-      return { success: true }
-    } catch (error) {
-      console.error("Update profile error:", error)
-      return { success: false, message: "Profil güncellenirken bir hata oluştu" }
-    } finally {
-      setIsLoading(false)
+    if (avatarUrl && !avatarUrl.startsWith("https://")) {
+      return { success: false, message: "Profil görseli HTTPS adresi olmalıdır" }
     }
+
+    setIsLoading(true)
+    const supabase = getClientSupabaseInstance()
+    const emailChanged = normalizedEmail !== user.email.toLowerCase()
+    const authUpdates: UserAttributes = {
+      data: {
+        full_name: fullName,
+        avatar_url: avatarUrl || null,
+      },
+    }
+    if (emailChanged) authUpdates.email = normalizedEmail
+
+    const { error: authError } = await supabase.auth.updateUser(authUpdates)
+
+    if (authError) {
+      setIsLoading(false)
+      return { success: false, message: getAuthMessage(authError.message) }
+    }
+
+    const { error: profileError } = await supabase
+      .from("profiles")
+      .update({
+        full_name: fullName,
+        avatar_url: avatarUrl || null,
+      })
+      .eq("id", user.id)
+
+    if (profileError) {
+      setIsLoading(false)
+      return { success: false, message: "Profil güncellenemedi" }
+    }
+
+    await refreshUser()
+    setIsLoading(false)
+    return { success: true, requiresEmailConfirmation: emailChanged }
   }
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isLoading,
-        login,
-        logout,
-        register,
-        updateProfile,
-      }}
-    >
+    <AuthContext.Provider value={{ user, isLoading, login, logout, register, updateProfile, refreshUser }}>
       {children}
     </AuthContext.Provider>
   )
 }
 
-// Hook to use auth context
 export function useAuth() {
   const context = useContext(AuthContext)
-  if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider")
-  }
+  if (context === undefined) throw new Error("useAuth must be used within an AuthProvider")
   return context
 }

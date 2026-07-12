@@ -18,9 +18,10 @@ import { useAuth } from "@/context/auth-context"
 import { useRouter } from "next/navigation"
 // Import API functions and EmptyState
 import { EmptyState } from "@/components/empty-state"
+import type { Table } from "@/lib/types"
 
 export default function TablesPage() {
-  const { tables, addTable, updateTable, deleteTable } = useTableContext()
+  const { tables, isLoading: tablesLoading, addTable, updateTable, deleteTable } = useTableContext()
   const { toast } = useToast()
   const { user, isLoading } = useAuth()
   const router = useRouter()
@@ -39,7 +40,7 @@ export default function TablesPage() {
   const barTables = tables.filter((table) => table.section === "Bar")
   const terraceTables = tables.filter((table) => table.section === "Teras")
 
-  if (isLoading) {
+  if (isLoading || tablesLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-orange-500"></div>
@@ -52,7 +53,7 @@ export default function TablesPage() {
     return null
   }
 
-  const handleAddTable = () => {
+  const handleAddTable = async () => {
     try {
       if (!tableNumber || !tableCapacity || !tableSection) {
         toast({
@@ -74,7 +75,7 @@ export default function TablesPage() {
         return
       }
 
-      addTable(tableNumber, Number.parseInt(tableCapacity), tableSection)
+      await addTable(tableNumber, Number.parseInt(tableCapacity), tableSection)
       setIsAddDialogOpen(false)
 
       // Formu temizle
@@ -86,7 +87,7 @@ export default function TablesPage() {
         title: "Başarılı",
         description: "Masa başarıyla eklendi",
       })
-    } catch (error) {
+    } catch {
       toast({
         title: "Hata",
         description: "Masa eklenirken bir hata oluştu",
@@ -95,7 +96,7 @@ export default function TablesPage() {
     }
   }
 
-  const handleEditTable = () => {
+  const handleEditTable = async () => {
     try {
       if (!selectedTable || !tableNumber || !tableCapacity || !tableSection) {
         toast({
@@ -117,7 +118,7 @@ export default function TablesPage() {
         return
       }
 
-      updateTable(selectedTable, {
+      await updateTable(selectedTable, {
         number: tableNumber,
         capacity: Number.parseInt(tableCapacity),
         section: tableSection,
@@ -129,7 +130,7 @@ export default function TablesPage() {
         title: "Başarılı",
         description: "Masa başarıyla güncellendi",
       })
-    } catch (error) {
+    } catch {
       toast({
         title: "Hata",
         description: "Masa güncellenirken bir hata oluştu",
@@ -138,31 +139,31 @@ export default function TablesPage() {
     }
   }
 
-  const handleDeleteTable = () => {
+  const handleDeleteTable = async () => {
     try {
       if (!selectedTable) return
 
-      deleteTable(selectedTable)
+      await deleteTable(selectedTable)
       setIsDeleteDialogOpen(false)
 
       toast({
         title: "Başarılı",
         description: "Masa başarıyla silindi",
       })
-    } catch (error: any) {
+    } catch (error) {
       toast({
         title: "Hata",
-        description: error.message || "Masa silinirken bir hata oluştu",
+        description: error instanceof Error ? error.message : "Masa silinirken bir hata oluştu",
         variant: "destructive",
       })
     }
   }
 
-  const openEditDialog = (table: any) => {
+  const openEditDialog = (table: Table) => {
     setSelectedTable(table.id)
     setTableNumber(table.number)
     setTableCapacity(table.capacity.toString())
-    setTableSection(table.section)
+    setTableSection(table.section ?? "Ana Salon")
     setIsEditDialogOpen(true)
   }
 
@@ -171,7 +172,7 @@ export default function TablesPage() {
     setIsDeleteDialogOpen(true)
   }
 
-  const renderTableCard = (table: any) => (
+  const renderTableCard = (table: Table) => (
     <Card key={table.id} className="overflow-hidden shadow-sm hover:shadow-md transition-shadow">
       <CardHeader
         className={`pb-2 ${

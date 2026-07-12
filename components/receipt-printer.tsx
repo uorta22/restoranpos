@@ -48,39 +48,29 @@ export function ReceiptPrinter({ order, onClose }: ReceiptPrinterProps) {
         return
       }
 
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>Sipariş Fişi #${order.id.slice(-6)}</title>
-            <style>
-              body { font-family: 'Courier New', monospace; margin: 0; padding: 0; }
-              @media print {
-                body { width: 80mm; }
-              }
-            </style>
-          </head>
-          <body>
-            ${receiptRef.current?.innerHTML || ""}
-          </body>
-        </html>
-      `)
+      const receipt = receiptRef.current
+      if (!receipt) {
+        printWindow.close()
+        throw new Error("Yazdırılacak fiş bulunamadı")
+      }
 
-      printWindow.document.close()
+      printWindow.document.title = `Sipariş Fişi #${order.id.slice(-6)}`
+      const style = printWindow.document.createElement("style")
+      style.textContent = `
+        body { font-family: "Courier New", monospace; margin: 0; padding: 0; }
+        @media print { body { width: 80mm; } }
+      `
+      printWindow.document.head.appendChild(style)
+      printWindow.document.body.replaceChildren(receipt.cloneNode(true))
 
       // Yazdırma işlemi
       setTimeout(() => {
         printWindow.focus()
         printWindow.print()
 
-        // Yazdırma tamamlandığında pencereyi kapat
+        setIsPrinting(false)
         printWindow.onafterprint = () => {
           printWindow.close()
-          setIsPrinting(false)
-
-          toast({
-            title: "Başarılı",
-            description: "Fiş yazdırma işlemi başarıyla tamamlandı.",
-          })
         }
       }, 500)
     } catch (error) {
@@ -225,16 +215,16 @@ export function ReceiptPrinter({ order, onClose }: ReceiptPrinterProps) {
         <div className="space-y-1">
           <div className="flex justify-between">
             <div>Ara Toplam:</div>
-            <div>{formatCurrency(order.subtotal || order.total)}</div>
+            <div>{formatCurrency(order.subtotal ?? order.total)}</div>
           </div>
           <div className="flex justify-between">
             <div>KDV (%8):</div>
-            <div>{formatCurrency(order.tax || order.total * 0.08)}</div>
+            <div>{formatCurrency(order.tax ?? order.total * 0.08)}</div>
           </div>
-          {order.deliveryFee > 0 && (
+          {(order.deliveryFee ?? 0) > 0 && (
             <div className="flex justify-between">
               <div>Teslimat Ücreti:</div>
-              <div>{formatCurrency(order.deliveryFee)}</div>
+              <div>{formatCurrency(order.deliveryFee ?? 0)}</div>
             </div>
           )}
           <div className="flex justify-between font-bold">

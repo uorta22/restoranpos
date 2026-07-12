@@ -1,41 +1,23 @@
 "use client"
 
-import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { useCourierContext } from "@/context/courier-context"
 import { useOrderContext } from "@/context/order-context"
-import { Bike, Car, Truck, Phone, Package, Plus, Users } from "lucide-react"
+import { Bike, Car, Truck, Phone, Package, Users } from "lucide-react"
 import { EmptyState } from "@/components/empty-state"
 
 export function CourierDashboard() {
   const { couriers, getAvailableCouriers } = useCourierContext()
   const { getDeliveryOrders } = useOrderContext()
 
-  const [availableCouriers, setAvailableCouriers] = useState<number>(0)
-  const [busyCouriers, setBusyCouriers] = useState<number>(0)
-  const [completedDeliveries, setCompletedDeliveries] = useState<number>(0)
-  const [pendingOrders, setPendingOrders] = useState<number>(0)
-
-  useEffect(() => {
-    // Kurye durumlarını hesapla
-    const available = getAvailableCouriers().length
-    const busy = couriers.filter((c) => c.status !== "Müsait").length
-    const completed = couriers.reduce((total, courier) => total + courier.totalDeliveries, 0)
-
-    // Bekleyen paket servis siparişlerini hesapla
-    const deliveryOrders = getDeliveryOrders()
-    const pending = deliveryOrders.filter(
+  const availableCouriers = getAvailableCouriers().length
+  const busyCouriers = couriers.filter((courier) => courier.status !== "Müsait").length
+  const completedDeliveries = couriers.reduce((total, courier) => total + courier.totalDeliveries, 0)
+  const pendingOrders = getDeliveryOrders().filter(
       (order) =>
         order.status === "Hazır" && (!order.deliveryStatus || order.deliveryStatus === "Beklemede") && !order.courierId,
-    ).length
-
-    setAvailableCouriers(available)
-    setBusyCouriers(busy)
-    setCompletedDeliveries(completed)
-    setPendingOrders(pending)
-  }, [couriers, getAvailableCouriers, getDeliveryOrders])
+  ).length
 
   const getVehicleIcon = (type: string) => {
     switch (type) {
@@ -70,12 +52,6 @@ export function CourierDashboard() {
         icon={Users}
         title="Henüz kurye eklenmemiş"
         description="Paket servis hizmeti verebilmek için önce kurye eklemeniz gerekiyor."
-        action={
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            İlk Kuryeyi Ekle
-          </Button>
-        }
       />
     )
   }

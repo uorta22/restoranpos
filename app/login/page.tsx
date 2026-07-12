@@ -45,45 +45,28 @@ export default function LoginPage() {
     }
 
     try {
-      console.log("Giriş işlemi başlatılıyor..."); // Giriş işleminin başladığını belirt
-
-      const result = await login(loginData.email, loginData.password);
-
-      console.log("Giriş sonucu:", result); // Giriş sonucunu konsola yazdır
+      const result = await login(loginData.email, loginData.password)
 
       if (result.success) {
-        console.log("Giriş başarılı!"); // Girişin başarılı olduğunu belirt
-
-        // Başarılı giriş sonrası localStorage'a token bilgisini kaydet (simülasyon)
-        localStorage.setItem("auth_token", "mock-jwt-token-" + Date.now());
-
-        // Yönlendirme URL'ini kontrol et
-        const urlParams = new URLSearchParams(window.location.search);
-        const redirectUrl = urlParams.get("redirect") || "/";
-
-        console.log("Yönlendirme URL'si:", redirectUrl); // Yönlendirme URL'sini konsola yazdır
-
-        router.push(redirectUrl);
-
-        console.log("Yönlendirme işlemi tamamlandı."); // Yönlendirme işleminin tamamlandığını belirt
+        const requestedRedirect = new URLSearchParams(window.location.search).get("redirect")
+        const redirectUrl =
+          requestedRedirect?.startsWith("/") && !requestedRedirect.startsWith("//") ? requestedRedirect : "/"
+        router.replace(result.needsOnboarding ? "/onboarding" : redirectUrl)
       } else {
-        console.log("Giriş başarısız:", result.message); // Girişin başarısız olduğunu belirt
         toast({
           title: "Giriş başarısız",
           description: result.message || "E-posta veya şifre hatalı",
           variant: "destructive",
-        });
+        })
       }
-    } catch (error) {
-      console.error("Giriş sırasında hata:", error); // Hata mesajını konsola yazdır
+    } catch {
       toast({
         title: "Hata",
         description: "Giriş sırasında bir hata oluştu",
         variant: "destructive",
-      });
+      })
     } finally {
-      setIsLoading(false);
-      console.log("Giriş işlemi tamamlandı."); // Giriş işleminin tamamlandığını belirt
+      setIsLoading(false)
     }
   }
 
@@ -104,7 +87,7 @@ export default function LoginPage() {
     if (!validatePassword(registerData.password)) {
       toast({
         title: "Geçersiz şifre",
-        description: "Şifre en az 6 karakter olmalıdır",
+        description: "Şifre en az 8 karakter, büyük harf, küçük harf ve rakam içermelidir",
         variant: "destructive",
       })
       setIsLoading(false)
@@ -122,11 +105,24 @@ export default function LoginPage() {
     }
 
     try {
-      const result = await register(registerData.name, registerData.email, registerData.password, registerData.role)
+      const requestedRedirect = new URLSearchParams(window.location.search).get("redirect")
+      const redirectUrl =
+        requestedRedirect?.startsWith("/") && !requestedRedirect.startsWith("//")
+          ? requestedRedirect
+          : "/onboarding"
+      const result = await register(
+        registerData.name,
+        registerData.email,
+        registerData.password,
+        registerData.role,
+        redirectUrl,
+      )
       if (result.success) {
         toast({
           title: "Kayıt başarılı",
-          description: "Hesabınız başarıyla oluşturuldu. Şimdi giriş yapabilirsiniz.",
+          description: result.requiresEmailConfirmation
+            ? "E-posta adresinize gönderilen doğrulama bağlantısını açın."
+            : "Hesabınız oluşturuldu.",
         })
         // Reset form and switch to login tab
         setRegisterData({
@@ -136,6 +132,7 @@ export default function LoginPage() {
           confirmPassword: "",
           role: "Garson",
         })
+        if (result.needsOnboarding) router.replace(redirectUrl.startsWith("/invite/") ? redirectUrl : "/onboarding")
       } else {
         toast({
           title: "Kayıt başarısız",
@@ -143,7 +140,7 @@ export default function LoginPage() {
           variant: "destructive",
         })
       }
-    } catch (error) {
+    } catch {
       toast({
         title: "Hata",
         description: "Kayıt sırasında bir hata oluştu",
@@ -189,7 +186,7 @@ export default function LoginPage() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="password">Şifre</Label>
-                      <a href="#" className="text-xs text-orange-600 hover:underline">
+                      <a href="/forgot-password" className="text-xs text-orange-600 hover:underline">
                         Şifremi Unuttum
                       </a>
                     </div>
@@ -270,15 +267,6 @@ export default function LoginPage() {
           </TabsContent>
         </Tabs>
 
-        <div className="mt-4 text-center text-sm text-gray-600">
-          <p>Demo hesapları:</p>
-          <p>
-            <strong>Admin:</strong> admin@example.com / password123
-          </p>
-          <p>
-            <strong>Garson:</strong> waiter@example.com / password123
-          </p>
-        </div>
       </div>
     </div>
   )

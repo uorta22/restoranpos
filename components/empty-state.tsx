@@ -3,16 +3,19 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Plus, Database, AlertTriangle } from "lucide-react"
+import type { LucideIcon } from "lucide-react"
 
 interface EmptyStateProps {
-  type: "products" | "tables" | "orders" | "database"
+  type?: "products" | "tables" | "orders" | "database" | "users" | "suppliers"
+  icon?: LucideIcon
+  action?: React.ReactNode
   onAction?: () => void
   actionLabel?: string
   title?: string
   description?: string
 }
 
-export function EmptyState({ type, onAction, actionLabel, title, description }: EmptyStateProps) {
+export function EmptyState({ type, icon: Icon, action, onAction, actionLabel, title, description }: EmptyStateProps) {
   const getEmptyStateContent = () => {
     switch (type) {
       case "products":
@@ -59,15 +62,15 @@ export function EmptyState({ type, onAction, actionLabel, title, description }: 
   return (
     <Card className="w-full max-w-md mx-auto">
       <CardContent className="flex flex-col items-center justify-center p-8 text-center">
-        <div className="mb-4">{content.icon}</div>
+        <div className="mb-4">{Icon ? <Icon className="h-12 w-12 text-gray-400" /> : content.icon}</div>
         <h3 className="text-lg font-semibold text-gray-900 mb-2">{content.title}</h3>
         <p className="text-sm text-gray-500 mb-6">{content.description}</p>
-        {onAction && (
+        {action || (onAction && (
           <Button onClick={onAction} className="gap-2">
             {type === "database" ? <Database className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
             {content.actionLabel}
           </Button>
-        )}
+        ))}
       </CardContent>
     </Card>
   )

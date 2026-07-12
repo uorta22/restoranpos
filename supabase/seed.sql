@@ -1,0 +1,1 @@
+-- Reference data is versioned in migrations. Add local-only demo rows here when needed.

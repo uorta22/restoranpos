@@ -1,15 +1,13 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
-import { useLocalStorage } from "@/hooks/use-local-storage"
-import { useToast } from "@/hooks/use-toast"
-import { useAuth } from "./auth-context"
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
+import { getClientSupabaseInstance } from "@/lib/supabase"
+import { useAuth } from "@/context/auth-context"
 
-// Feature sets and descriptions
 export const FEATURE_SETS = {
   basic: ["menu", "orders", "tables"],
   standard: ["menu", "orders", "tables", "kitchen", "reports", "inventory"],
-  pro: ["menu", "orders", "tables", "kitchen", "reports", "inventory", "analytics", "marketing", "delivery", "loyalty"],
+  pro: ["menu", "orders", "tables", "kitchen", "reports", "inventory", "analytics", "delivery"],
 }
 
 export const FEATURE_DESCRIPTIONS = {
@@ -20,43 +18,14 @@ export const FEATURE_DESCRIPTIONS = {
   reports: "Raporlar",
   inventory: "Stok takibi",
   analytics: "Gelişmiş analitik",
-  marketing: "Pazarlama araçları",
   delivery: "Kurye ve teslimat",
-  loyalty: "Sadakat programı",
 }
-
-export const LICENSE_PLANS = [
-  {
-    type: "BASIC",
-    name: "Basic",
-    description: "Essential features for small businesses",
-    price: 19,
-    priceUnit: "$",
-    period: "month",
-  },
-  {
-    type: "STANDARD",
-    name: "Standard",
-    description: "Ideal for growing businesses",
-    price: 49,
-    priceUnit: "$",
-    period: "month",
-  },
-  {
-    type: "PREMIUM",
-    name: "Premium",
-    description: "Advanced features for large enterprises",
-    price: 99,
-    priceUnit: "$",
-    period: "month",
-  },
-]
 
 export type License = {
   id: string
   userId: string
   type: string
-  plan?: string
+  plan: string
   features: string[]
   validUntil: string
   restaurantName?: string
@@ -66,10 +35,10 @@ export type License = {
   restaurantLogo?: string
   createdAt: string
   updatedAt: string
-  status?: string
+  status: string
 }
 
-type LicenseContextType = {
+interface LicenseContextType {
   license: License | null
   isLoading: boolean
   isLicenseValid: () => boolean
@@ -80,142 +49,115 @@ type LicenseContextType = {
   updateLicense: (license: Partial<License>) => Promise<void>
   isFeatureRestricted: (feature: string) => boolean
   hasFeature: (feature: string) => boolean
+  refreshLicense: () => Promise<void>
 }
 
 const LicenseContext = createContext<LicenseContextType | undefined>(undefined)
 
 export function LicenseProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth()
-  const { toast } = useToast()
+  const { user, isLoading: isAuthLoading } = useAuth()
   const [isLoading, setIsLoading] = useState(true)
-  const [license, setLicense] = useLocalStorage<License | null>("restaurant-pos-license", null)
+  const [license, setLicense] = useState<License | null>(null)
 
-  useEffect(() => {
-    const fetchLicense = async () => {
-      if (!user) {
-        setIsLoading(false)
+  const refreshLicense = useCallback(async () => {
+    if (!user?.restaurant_id) {
+      setLicense(null)
+      setIsLoading(false)
+      return
+    }
+
+    setIsLoading(true)
+    const supabase = getClientSupabaseInstance()
+    try {
+      const [subscriptionResult, restaurantResult] = await Promise.all([
+        supabase
+          .from("restaurant_subscriptions")
+          .select("*")
+          .eq("restaurant_id", user.restaurant_id)
+          .maybeSingle(),
+        supabase.from("restaurants").select("*").eq("id", user.restaurant_id).single(),
+      ])
+
+      if (subscriptionResult.error) throw subscriptionResult.error
+      if (restaurantResult.error) throw restaurantResult.error
+      if (!subscriptionResult.data) {
+        setLicense(null)
         return
       }
 
-      try {
-        // In a real app, you would fetch the license from an API
-        // For now, we'll use a mock license if one doesn't exist
-        if (!license || license.userId !== user.id) {
-          const mockLicense: License = {
-            id: "license_" + Math.random().toString(36).substr(2, 9),
-            userId: user.id,
-            type: "FREE",
-            plan: "basic",
-            features: FEATURE_SETS.basic,
-            validUntil: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), // 14 days from now
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          }
-          setLicense(mockLicense)
-        }
-      } catch (error) {
-        console.error("Error fetching license:", error)
-        toast({
-          variant: "destructive",
-          title: "Lisans bilgileri alınamadı",
-          description: "Lütfen daha sonra tekrar deneyin.",
-        })
-      } finally {
-        setIsLoading(false)
-      }
-    }
+      const { data: plan, error: planError } = await supabase
+        .from("subscription_plans")
+        .select("features")
+        .eq("id", subscriptionResult.data.plan_id)
+        .single()
+      if (planError) throw planError
 
-    fetchLicense()
-  }, [user, license, setLicense, toast])
+      const subscription = subscriptionResult.data
+      const restaurant = restaurantResult.data
+      const validUntil = subscription.trial_ends_at || subscription.current_period_end || new Date(0).toISOString()
+      setLicense({
+        id: subscription.restaurant_id,
+        userId: user.id,
+        type: subscription.status === "trialing" ? "TRIAL" : subscription.status.toUpperCase(),
+        plan: subscription.plan_id,
+        features: plan.features,
+        validUntil,
+        restaurantName: restaurant.name,
+        restaurantAddress: restaurant.address ?? undefined,
+        restaurantPhone: restaurant.phone ?? undefined,
+        restaurantEmail: restaurant.email ?? undefined,
+        restaurantLogo: restaurant.logo_url ?? undefined,
+        createdAt: subscription.created_at,
+        updatedAt: subscription.updated_at,
+        status: subscription.status,
+      })
+    } catch {
+      setLicense(null)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (isAuthLoading) return
+    const timeoutId = window.setTimeout(() => void refreshLicense(), 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [isAuthLoading, refreshLicense])
 
   const isLicenseValid = () => {
-    if (!license) return false
-    const now = new Date()
-    const validUntil = new Date(license.validUntil)
-    return now < validUntil
+    if (!license || !["trialing", "active"].includes(license.status)) return false
+    return new Date(license.validUntil).getTime() > Date.now()
   }
 
   const isTrialExpired = () => {
-    if (!license || license.type !== "FREE") return true
-    const now = new Date()
-    const validUntil = new Date(license.validUntil)
-    return now > validUntil
+    if (!license || license.status !== "trialing") return false
+    return new Date(license.validUntil).getTime() <= Date.now()
   }
 
   const getRemainingDays = () => {
     if (!license) return 0
-    const now = new Date()
-    const validUntil = new Date(license.validUntil)
-    const diff = validUntil.getTime() - now.getTime()
-    return Math.ceil(diff / (1000 * 60 * 60 * 24))
+    return Math.max(0, Math.ceil((new Date(license.validUntil).getTime() - Date.now()) / 86_400_000))
   }
 
   const activateLicense = async (licenseKey: string) => {
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-    // In a real app, you would validate the license key against your server
-    if (licenseKey === "VALID-LICENSE-KEY") {
-      const newLicense = {
-        ...license,
-        type: "PREMIUM",
-        plan: "pro",
-        features: FEATURE_SETS.pro,
-        validUntil: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(), // 1 year from now
-      }
-      setLicense(newLicense as License)
-      return { success: true }
-    } else {
-      return { success: false, message: "Geçersiz lisans anahtarı" }
+    void licenseKey
+    return {
+      success: false,
+      message: "Lisans anahtarıyla aktivasyon desteklenmiyor. Abonelik değişiklikleri ödeme sağlayıcısı üzerinden yapılmalıdır.",
     }
   }
 
   const startTrial = async () => {
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-    const newLicense = {
-      ...license,
-      type: "TRIAL",
-      plan: "standard",
-      features: FEATURE_SETS.standard,
-      validUntil: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(), // 14 days from now
-    }
-    setLicense(newLicense as License)
+    await refreshLicense()
   }
 
   const updateLicense = async (updatedLicense: Partial<License>) => {
-    if (!license) return
-
-    try {
-      // In a real app, you would update the license via an API
-      const newLicense = {
-        ...license,
-        ...updatedLicense,
-        updatedAt: new Date().toISOString(),
-      }
-      setLicense(newLicense as License)
-      return Promise.resolve()
-    } catch (error) {
-      console.error("Error updating license:", error)
-      toast({
-        variant: "destructive",
-        title: "Lisans güncellenemedi",
-        description: "Lütfen daha sonra tekrar deneyin.",
-      })
-      return Promise.reject(error)
-    }
+    void updatedLicense
+    throw new Error("Abonelik istemciden değiştirilemez")
   }
 
-  const isFeatureRestricted = (feature: string) => {
-    if (!license) return true
-    return !license.features.includes(feature)
-  }
-
-  const hasFeature = (feature: string) => {
-    if (!license) return false
-    return license.features.includes(feature)
-  }
+  const hasFeature = (feature: string) => Boolean(license?.features.includes(feature) && isLicenseValid())
+  const isFeatureRestricted = (feature: string) => !hasFeature(feature)
 
   return (
     <LicenseContext.Provider
@@ -230,6 +172,7 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
         updateLicense,
         isFeatureRestricted,
         hasFeature,
+        refreshLicense,
       }}
     >
       {children}
@@ -239,8 +182,6 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
 
 export function useLicense() {
   const context = useContext(LicenseContext)
-  if (context === undefined) {
-    throw new Error("useLicense must be used within a LicenseProvider")
-  }
+  if (context === undefined) throw new Error("useLicense must be used within a LicenseProvider")
   return context
 }

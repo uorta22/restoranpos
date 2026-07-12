@@ -1,108 +1,273 @@
-import { getClientSupabaseInstance, isSupabaseConfigured } from "./supabase"
-import type { FoodItem, Table, Order, CartItem } from "./types" // Added Category
+import { getClientSupabaseInstance } from "@/lib/supabase"
+import { requireRestaurantId } from "@/lib/restaurant-session"
+import type {
+  DeliveryStatus,
+  Json,
+  MemberRole,
+  OrderStatus,
+  OrderType as DatabaseOrderType,
+  PaymentMethod,
+  PaymentStatus,
+  ProductKind,
+  ReservationStatus,
+  TableStatus,
+  Tables,
+  TablesUpdate,
+} from "@/lib/database.types"
+import {
+  OrderType,
+  type CartItem,
+  type Category,
+  type Courier,
+  type DeliveryAddress,
+  type FoodItem,
+  type InventoryItem,
+  type Order,
+  type Reservation,
+  type Supplier,
+  type Table,
+} from "@/lib/types"
 
-const getSupabase = () => {
-  if (!isSupabaseConfigured()) {
-    console.warn(
-      "Supabase is not configured. Make sure to set the SUPABASE_URL and SUPABASE_ANON_KEY environment variables.",
-    )
-    return null
+const orderStatusToUi: Record<OrderStatus, Order["status"]> = {
+  pending: "Beklemede",
+  preparing: "Hazırlanıyor",
+  ready: "Hazır",
+  completed: "Tamamlandı",
+  cancelled: "İptal Edildi",
+}
+
+const orderStatusToDatabase: Record<Order["status"], OrderStatus> = {
+  Beklemede: "pending",
+  Hazırlanıyor: "preparing",
+  Hazır: "ready",
+  Tamamlandı: "completed",
+  "İptal Edildi": "cancelled",
+}
+
+const paymentStatusToUi: Record<PaymentStatus, Order["paymentStatus"]> = {
+  pending: "Beklemede",
+  partially_paid: "Kısmi Ödendi",
+  paid: "Ödendi",
+  refunded: "İade Edildi",
+  failed: "Başarısız",
+}
+
+const deliveryStatusToUi: Record<DeliveryStatus, NonNullable<Order["deliveryStatus"]>> = {
+  pending: "Beklemede",
+  assigned: "Atandı",
+  en_route: "Yolda",
+  delivered: "Teslim Edildi",
+  cancelled: "İptal Edildi",
+}
+
+const deliveryStatusToDatabase: Record<NonNullable<Order["deliveryStatus"]>, DeliveryStatus> = {
+  Beklemede: "pending",
+  Atandı: "assigned",
+  Yolda: "en_route",
+  "Teslim Edildi": "delivered",
+  "İptal Edildi": "cancelled",
+}
+
+const reservationStatusToUi: Record<ReservationStatus, Reservation["status"]> = {
+  pending: "Beklemede",
+  confirmed: "Onaylandı",
+  completed: "Tamamlandı",
+  cancelled: "İptal Edildi",
+  no_show: "Gelmedi",
+}
+
+const reservationStatusToDatabase: Record<Reservation["status"], ReservationStatus> = {
+  Beklemede: "pending",
+  Onaylandı: "confirmed",
+  Tamamlandı: "completed",
+  "İptal Edildi": "cancelled",
+  Gelmedi: "no_show",
+}
+
+const tableStatusToUi: Record<TableStatus, Table["status"]> = {
+  available: "Müsait",
+  occupied: "Dolu",
+  reserved: "Rezerve",
+}
+
+const tableStatusToDatabase: Record<Table["status"], TableStatus> = {
+  Müsait: "available",
+  Dolu: "occupied",
+  Rezerve: "reserved",
+}
+
+function productKindToUi(kind: ProductKind): FoodItem["type"] {
+  return kind === "vegetarian" ? "Vejeteryan" : "Et"
+}
+
+function productKindToDatabase(kind: FoodItem["type"]): ProductKind {
+  return kind === "Vejeteryan" ? "vegetarian" : "meat"
+}
+
+function orderTypeToUi(type: DatabaseOrderType): OrderType {
+  if (type === "delivery") return OrderType.DELIVERY
+  if (type === "takeaway") return OrderType.TAKEAWAY
+  return OrderType.DINE_IN
+}
+
+function paymentMethodToUi(method: PaymentMethod): string {
+  if (method === "cash") return "Nakit"
+  if (method === "card") return "Kredi Kartı"
+  return "Online"
+}
+
+function paymentMethodToDatabase(method?: string): PaymentMethod {
+  if (method === "Nakit") return "cash"
+  if (method === "Kredi Kartı") return "card"
+  return "online"
+}
+
+function toJson(value: unknown): Json {
+  return JSON.parse(JSON.stringify(value)) as Json
+}
+
+function toDeliveryAddress(value: Json | null): DeliveryAddress | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+
+  const text = (key: string) => {
+    const candidate = value[key]
+    return typeof candidate === "string" ? candidate : undefined
   }
-  return getClientSupabaseInstance()
+  const rawLocation = value.location
+  const location =
+    rawLocation && typeof rawLocation === "object" && !Array.isArray(rawLocation)
+      ? {
+          lat: typeof rawLocation.lat === "number" ? rawLocation.lat : 0,
+          lng: typeof rawLocation.lng === "number" ? rawLocation.lng : 0,
+        }
+      : undefined
+
+  return {
+    fullAddress: text("fullAddress"),
+    address: text("address"),
+    district: text("district"),
+    city: text("city"),
+    contactName: text("contactName"),
+    customerName: text("customerName"),
+    contactPhone: text("contactPhone"),
+    phone: text("phone"),
+    instructions: text("instructions"),
+    location,
+  }
 }
 
-// Reservation interface
-interface Reservation {
-  id: string
-  customerName: string
-  date: Date
-  people: number
-  tableNumber?: string
-  phone: string
-  notes?: string
-  status: "Onaylandı" | "Beklemede" | "İptal"
+async function getRestaurantId(requestedRestaurantId?: string) {
+  const supabase = getClientSupabaseInstance()
+  const restaurantId = await requireRestaurantId(supabase, requestedRestaurantId)
+  return { supabase, restaurantId }
 }
 
-// Analytics interface
-interface Analytics {
-  id: string
-  date: string
-  totalOrders: number
-  totalRevenue: number
-  avgOrderValue: number
-  popularItems: any[]
-  peakHours: any[]
+async function fetchOrders(restaurantId: string, orderId?: string): Promise<Order[]> {
+  const supabase = getClientSupabaseInstance()
+  let orderQuery = supabase
+    .from("orders")
+    .select("*")
+    .eq("restaurant_id", restaurantId)
+    .order("created_at", { ascending: false })
+
+  if (orderId) orderQuery = orderQuery.eq("id", orderId)
+
+  const { data: orderRows, error: ordersError } = await orderQuery
+  if (ordersError) throw new Error(`Siparişler okunamadı: ${ordersError.message}`)
+  if (!orderRows.length) return []
+
+  const orderIds = orderRows.map((order) => order.id)
+  const [{ data: itemRows, error: itemError }, { data: tableRows, error: tableError }, deliveryResult, paymentResult] =
+    await Promise.all([
+      supabase.from("order_items").select("*").eq("restaurant_id", restaurantId).in("order_id", orderIds),
+      supabase.from("restaurant_tables").select("*").eq("restaurant_id", restaurantId),
+      supabase.from("deliveries").select("*").eq("restaurant_id", restaurantId).in("order_id", orderIds),
+      supabase
+        .from("payments")
+        .select("*")
+        .eq("restaurant_id", restaurantId)
+        .in("order_id", orderIds)
+        .order("created_at", { ascending: false }),
+    ])
+
+  if (itemError) throw new Error(`Sipariş kalemleri okunamadı: ${itemError.message}`)
+  if (tableError) throw new Error(`Masa bilgileri okunamadı: ${tableError.message}`)
+  if (deliveryResult.error) throw new Error(`Teslimatlar okunamadı: ${deliveryResult.error.message}`)
+  if (paymentResult.error) throw new Error(`Ödemeler okunamadı: ${paymentResult.error.message}`)
+
+  const tablesById = new Map(tableRows.map((table) => [table.id, table]))
+  const deliveriesByOrder = new Map(deliveryResult.data.map((delivery) => [delivery.order_id, delivery]))
+  const paymentsByOrder = new Map<string, Tables<"payments">>()
+
+  for (const payment of paymentResult.data) {
+    if (!paymentsByOrder.has(payment.order_id)) paymentsByOrder.set(payment.order_id, payment)
+  }
+
+  const itemsByOrder = new Map<string, CartItem[]>()
+  for (const item of itemRows) {
+    const cartItem: CartItem = {
+      id: item.id,
+      quantity: item.quantity,
+      notes: item.notes ?? undefined,
+      foodItem: {
+        id: item.product_id ?? item.id,
+        title: item.product_name,
+        price: item.unit_price,
+        category: "Sipariş",
+        available: false,
+        type: "Et",
+        discount: item.unit_price * item.quantity > 0 ? (item.discount_amount / (item.unit_price * item.quantity)) * 100 : 0,
+      },
+    }
+    const currentItems = itemsByOrder.get(item.order_id) ?? []
+    currentItems.push(cartItem)
+    itemsByOrder.set(item.order_id, currentItems)
+  }
+
+  return orderRows.map((order) => {
+    const table = order.table_id ? tablesById.get(order.table_id) : undefined
+    const delivery = deliveriesByOrder.get(order.id)
+    const payment = paymentsByOrder.get(order.id)
+
+    return {
+      id: order.id,
+      restaurant_id: order.restaurant_id,
+      items: itemsByOrder.get(order.id) ?? [],
+      total: order.total_amount,
+      subtotal: order.subtotal,
+      tax: order.tax_amount,
+      discount: order.discount_amount,
+      type: orderTypeToUi(order.type),
+      status: orderStatusToUi[order.status],
+      paymentStatus: paymentStatusToUi[order.payment_status],
+      paymentMethod: payment
+        ? paymentMethodToUi(payment.method)
+        : order.requested_payment_method
+          ? paymentMethodToUi(order.requested_payment_method)
+          : undefined,
+      createdAt: new Date(order.created_at),
+      updatedAt: new Date(order.updated_at),
+      tableId: order.table_id ?? undefined,
+      tableName: table?.number,
+      customerName: order.customer_name ?? undefined,
+      customerPhone: order.customer_phone ?? undefined,
+      notes: order.notes ?? undefined,
+      isDelivery: order.type === "delivery",
+      deliveryStatus: delivery ? deliveryStatusToUi[delivery.status] : undefined,
+      deliveryAddress: toDeliveryAddress(order.delivery_address),
+      deliveryTrackingToken: delivery?.tracking_token,
+      courierId: delivery?.courier_user_id ?? undefined,
+      estimatedDeliveryTime: delivery?.estimated_delivery_at
+        ? new Date(delivery.estimated_delivery_at)
+        : undefined,
+    }
+  })
 }
 
-// Inventory interface
-interface InventoryItem {
-  id: string
-  productId: string
-  currentStock: number
-  minStock: number
-  maxStock: number
-  unit: string
-  costPrice?: number
-  supplierId?: string
-  lastUpdated: string
-}
-
-// Supplier interface
-interface Supplier {
-  id: string
-  name: string
-  contact_name?: string | null
-  phone?: string | null
-  email?: string | null
-  address?: string | null
-  restaurant_id: string
-  created_at?: string
-  updated_at?: string
-}
-
-// Orders API - Database column'larına uygun
 export const ordersApi = {
   async getAll(): Promise<Order[]> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return []
-
-      const { data, error } = await supabase
-        .from("orders")
-        .select(`
-          *,
-          tables(number, section)
-        `)
-        .order("created_at", { ascending: false })
-
-      if (error) {
-        console.error("Orders fetch error:", error)
-        return []
-      }
-
-      return (
-        data?.map((order) => ({
-          id: order.id,
-          items: order.items as CartItem[],
-          total: order.total_amount, // Database'den total_amount alıyoruz
-          status: order.status as "Beklemede" | "Hazırlanıyor" | "Hazır" | "Tamamlandı" | "İptal Edildi",
-          paymentStatus: order.payment_status as "Beklemede" | "Ödendi",
-          paymentMethod: order.payment_method,
-          createdAt: new Date(order.created_at), // Ensure Date object
-          updatedAt: new Date(order.updated_at), // Ensure Date object
-          tableName: order.tables?.number,
-          customerName: order.customer_name,
-          notes: order.notes,
-          tableId: order.table_id,
-          isDelivery: order.is_delivery,
-          deliveryStatus: order.delivery_status as "Beklemede" | "Yolda" | "Teslim Edildi",
-          deliveryAddress: order.delivery_address,
-        })) || []
-      )
-    } catch (error) {
-      console.error("Orders fetch error:", error)
-      return []
-    }
+    const { restaurantId } = await getRestaurantId()
+    return fetchOrders(restaurantId)
   },
 
   async create(orderData: {
@@ -110,924 +275,634 @@ export const ordersApi = {
     total: number
     tableName?: string
     customerName?: string
+    customerPhone?: string
     notes?: string
     tableId?: string | null
     isDelivery?: boolean
-    deliveryAddress?: any
+    deliveryAddress?: DeliveryAddress
+    paymentMethod?: string
+    payNow?: boolean
   }): Promise<Order | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
+    if (!orderData.items.length) throw new Error("Sipariş en az bir ürün içermelidir")
 
-      // Validation
-      if (!orderData.items || orderData.items.length === 0) {
-        console.error("Order create error: No items provided")
-        return null
-      }
+    const { supabase, restaurantId } = await getRestaurantId()
+    const orderKind: DatabaseOrderType = orderData.isDelivery
+      ? "delivery"
+      : orderData.tableId
+        ? "dine_in"
+        : "takeaway"
 
-      if (!orderData.total || orderData.total <= 0) {
-        console.error("Order create error: Invalid total amount:", orderData.total)
-        return null
-      }
+    const rpcItems: Json = orderData.items.map((item) => ({
+      product_id: item.foodItem.id,
+      quantity: item.quantity,
+      notes: item.notes ?? null,
+    }))
 
-      console.log("Creating order with validated data:", {
-        ...orderData,
-        total_amount: orderData.total,
-      })
+    const { data: orderId, error } = await supabase.rpc("create_order", {
+      target_restaurant_id: restaurantId,
+      order_items: rpcItems,
+      order_kind: orderKind,
+      target_table_id: orderData.tableId ?? undefined,
+      target_customer_name: orderData.customerName ?? undefined,
+      target_customer_phone: orderData.customerPhone ?? orderData.deliveryAddress?.phone ?? undefined,
+      order_notes: orderData.notes ?? undefined,
+      target_delivery_address: orderData.deliveryAddress ? toJson(orderData.deliveryAddress) : undefined,
+      requested_payment_method: orderData.paymentMethod ? paymentMethodToDatabase(orderData.paymentMethod) : undefined,
+      pay_now: orderData.payNow ?? false,
+    })
 
-      const { data, error } = await supabase
-        .from("orders")
-        .insert({
-          table_id: orderData.tableId,
-          customer_name: orderData.customerName,
-          items: orderData.items,
-          total_amount: Number(orderData.total),
-          status: "Beklemede",
-          payment_status: "Beklemede",
-          notes: orderData.notes,
-          is_delivery: orderData.isDelivery || false,
-          delivery_address: orderData.deliveryAddress,
-          delivery_status: orderData.isDelivery ? "Beklemede" : null,
-          // created_at and updated_at will be set by default by Supabase
-        })
-        .select()
-        .single()
+    if (error) throw new Error(`Sipariş oluşturulamadı: ${error.message}`)
+    if (!orderId) return null
 
-      if (error) {
-        console.error("Order create error:", error)
-        return null
-      }
-
-      console.log("Order created successfully:", data)
-
-      return {
-        id: data.id,
-        items: data.items as CartItem[],
-        total: data.total_amount,
-        status: data.status,
-        paymentStatus: data.payment_status,
-        paymentMethod: data.payment_method,
-        createdAt: new Date(data.created_at),
-        updatedAt: new Date(data.updated_at),
-        tableName: orderData.tableName,
-        customerName: data.customer_name,
-        notes: data.notes,
-        tableId: data.table_id,
-        isDelivery: data.is_delivery,
-        deliveryStatus: data.delivery_status,
-        deliveryAddress: data.delivery_address,
-      }
-    } catch (error) {
-      console.error("Order create error:", error)
-      return null
-    }
+    return (await fetchOrders(restaurantId, orderId))[0] ?? null
   },
 
-  async updateStatus(
+  async updateStatus(id: string, status: Order["status"]): Promise<boolean> {
+    const { supabase } = await getRestaurantId()
+    const { error } = await supabase.rpc("set_order_status", {
+      target_order_id: id,
+      next_status: orderStatusToDatabase[status],
+    })
+    if (error) throw new Error(`Sipariş durumu güncellenemedi: ${error.message}`)
+    return true
+  },
+
+  async updatePaymentStatus(id: string, status: Order["paymentStatus"], method?: string): Promise<boolean> {
+    if (status !== "Ödendi") throw new Error("Kaydedilmiş ödemeler geriye dönük silinemez")
+
+    const { supabase } = await getRestaurantId()
+    const { error } = await supabase.rpc("record_order_payment", {
+      target_order_id: id,
+      payment_method: paymentMethodToDatabase(method),
+    })
+    if (error) throw new Error(`Ödeme kaydedilemedi: ${error.message}`)
+    return true
+  },
+
+  async updateDeliveryStatus(
     id: string,
-    status: "Beklemede" | "Hazırlanıyor" | "Hazır" | "Tamamlandı" | "İptal Edildi",
+    status: NonNullable<Order["deliveryStatus"]>,
+    location?: { lat: number; lng: number },
   ): Promise<boolean> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return false
-
-      const { error } = await supabase
-        .from("orders")
-        .update({
-          status,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", id)
-
-      if (error) {
-        console.error("Order status update error:", error)
-        return false
-      }
-      return true
-    } catch (error) {
-      console.error("Order status update error:", error)
-      return false
-    }
-  },
-
-  async updatePaymentStatus(id: string, status: "Beklemede" | "Ödendi", method?: string): Promise<boolean> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return false
-
-      const { error } = await supabase
-        .from("orders")
-        .update({
-          payment_status: status,
-          payment_method: method,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", id)
-
-      if (error) {
-        console.error("Payment status update error:", error)
-        return false
-      }
-      return true
-    } catch (error) {
-      console.error("Payment status update error:", error)
-      return false
-    }
-  },
-
-  async updateDeliveryStatus(id: string, status: "Beklemede" | "Yolda" | "Teslim Edildi"): Promise<boolean> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return false
-
-      const { error } = await supabase
-        .from("orders")
-        .update({
-          delivery_status: status,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", id)
-
-      if (error) {
-        console.error("Delivery status update error:", error)
-        return false
-      }
-      return true
-    } catch (error) {
-      console.error("Delivery status update error:", error)
-      return false
-    }
+    const { supabase } = await getRestaurantId()
+    const { error } = await supabase.rpc("set_delivery_status", {
+      target_order_id: id,
+      next_status: deliveryStatusToDatabase[status],
+      current_lat: location?.lat,
+      current_lng: location?.lng,
+    })
+    if (error) throw new Error(`Teslimat durumu güncellenemedi: ${error.message}`)
+    return true
   },
 }
 
-// Analytics API
+export interface Analytics {
+  id: string
+  date: string
+  totalOrders: number
+  totalRevenue: number
+  avgOrderValue: number
+  popularItems: { name: string; quantity: number }[]
+  peakHours: { hour: number; orders: number }[]
+}
+
 export const analyticsApi = {
   async getDashboardStats(): Promise<Analytics | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
-
-      const today = new Date().toISOString().split("T")[0]
-
-      const { data, error } = await supabase.from("analytics").select("*").eq("date", today).single()
-
-      if (error && error.code !== "PGRST116") {
-        // PGRST116 = no rows returned
-        console.error("Analytics fetch error:", error)
-        return null
-      }
-
-      if (!data) {
-        // Generate analytics for today
-        return await this.generateDailyAnalytics(today)
-      }
-
-      return {
-        id: data.id,
-        date: data.date,
-        totalOrders: data.total_orders,
-        totalRevenue: data.total_revenue,
-        avgOrderValue: data.avg_order_value,
-        popularItems: data.popular_items || [],
-        peakHours: data.peak_hours || [],
-      }
-    } catch (error) {
-      console.error("Analytics fetch error:", error)
-      return null
-    }
+    const today = new Date().toISOString().slice(0, 10)
+    return this.generateDailyAnalytics(today)
   },
 
   async generateDailyAnalytics(date: string): Promise<Analytics | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
+    const { supabase, restaurantId } = await getRestaurantId()
+    const { data, error } = await supabase
+      .from("daily_sales")
+      .select("*")
+      .eq("restaurant_id", restaurantId)
+      .eq("sales_date", date)
+      .maybeSingle()
 
-      // Get orders for the date
-      const { data: orders, error: ordersError } = await supabase
-        .from("orders")
-        .select("*")
-        .gte("created_at", `${date}T00:00:00`)
-        .lt("created_at", `${date}T23:59:59`)
+    if (error) throw new Error(`Satış özeti okunamadı: ${error.message}`)
+    if (!data) return null
 
-      if (ordersError) {
-        console.error("Orders fetch error for analytics:", ordersError)
-        return null
-      }
-
-      const totalOrders = orders?.length || 0
-      const totalRevenue = orders?.reduce((sum, order) => sum + order.total_amount, 0) || 0 // total_amount kullanıyoruz
-      const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
-
-      // Calculate popular items
-      const itemCounts: { [key: string]: number } = {}
-      orders?.forEach((order) => {
-        order.items?.forEach((item: any) => {
-          const itemName = item.foodItem?.title || "Unknown"
-          itemCounts[itemName] = (itemCounts[itemName] || 0) + item.quantity
-        })
-      })
-
-      const popularItems = Object.entries(itemCounts)
-        .sort(([, a], [, b]) => b - a)
-        .slice(0, 5)
-        .map(([name, count]) => ({ name, count }))
-
-      // Calculate peak hours
-      const hourCounts: { [key: number]: number } = {}
-      orders?.forEach((order) => {
-        const hour = new Date(order.created_at).getHours()
-        hourCounts[hour] = (hourCounts[hour] || 0) + 1
-      })
-
-      const peakHours = Object.entries(hourCounts)
-        .sort(([, a], [, b]) => b - a)
-        .slice(0, 3)
-        .map(([hour, count]) => ({ hour: Number.parseInt(hour), count }))
-
-      // Save analytics
-      const { data, error } = await supabase
-        .from("analytics")
-        .insert({
-          date,
-          total_orders: totalOrders,
-          total_revenue: totalRevenue,
-          avg_order_value: avgOrderValue,
-          popular_items: popularItems,
-          peak_hours: peakHours,
-        })
-        .select()
-        .single()
-
-      if (error) {
-        console.error("Analytics save error:", error)
-        return null
-      }
-
-      return {
-        id: data.id,
-        date: data.date,
-        totalOrders: data.total_orders,
-        totalRevenue: data.total_revenue,
-        avgOrderValue: data.avg_order_value,
-        popularItems: data.popular_items,
-        peakHours: data.peak_hours,
-      }
-    } catch (error) {
-      console.error("Analytics generation error:", error)
-      return null
+    return {
+      id: `${restaurantId}:${date}`,
+      date,
+      totalOrders: data.completed_orders ?? 0,
+      totalRevenue: data.total_revenue ?? 0,
+      avgOrderValue: data.average_order_value ?? 0,
+      popularItems: [],
+      peakHours: [],
     }
   },
 }
 
-// Inventory API
+async function loadInventory(requestedRestaurantId?: string): Promise<InventoryItem[]> {
+  const { supabase, restaurantId } = await getRestaurantId(requestedRestaurantId)
+  const [{ data: inventoryRows, error: inventoryError }, { data: productRows, error: productError }] =
+    await Promise.all([
+      supabase.from("inventory_items").select("*").eq("restaurant_id", restaurantId).order("updated_at", {
+        ascending: false,
+      }),
+      supabase.from("products").select("id, name").eq("restaurant_id", restaurantId),
+    ])
+
+  if (inventoryError) throw new Error(`Stok verileri okunamadı: ${inventoryError.message}`)
+  if (productError) throw new Error(`Ürün adları okunamadı: ${productError.message}`)
+
+  const productNames = new Map(productRows.map((product) => [product.id, product.name]))
+  return inventoryRows.map((item) => ({
+    id: item.id,
+    productId: item.product_id,
+    productName: productNames.get(item.product_id),
+    currentStock: item.current_stock,
+    minStock: item.min_stock,
+    maxStock: item.max_stock ?? undefined,
+    unit: item.unit,
+    costPrice: item.cost_price ?? undefined,
+    supplierId: item.supplier_id ?? undefined,
+    lastUpdated: item.updated_at,
+  }))
+}
+
 export const inventoryApi = {
-  async getAll(): Promise<InventoryItem[]> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return []
-
-      const { data, error } = await supabase
-        .from("inventory")
-        .select(`
-          *,
-          products(name, category_id) 
-        `) // Assuming products has category_id to join for category name
-        .order("last_updated", { ascending: false })
-
-      if (error) {
-        console.error("Inventory fetch error:", error)
-        return []
-      }
-
-      return (
-        data?.map((item) => ({
-          id: item.id,
-          productId: item.product_id,
-          currentStock: item.current_stock,
-          minStock: item.min_stock,
-          maxStock: item.max_stock,
-          unit: item.unit,
-          costPrice: item.cost_price,
-          supplierId: item.supplier_id,
-          lastUpdated: item.last_updated,
-          // productName: item.products?.name, // This would require a join
-          // productCategory: item.products?.categories?.name, // This would require a nested join
-        })) || []
-      )
-    } catch (error) {
-      console.error("Inventory fetch error:", error)
-      return []
-    }
-  },
+  getAll: loadInventory,
 
   async updateStock(productId: string, newStock: number): Promise<boolean> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return false
-
-      const { error } = await supabase
-        .from("inventory")
-        .update({
-          current_stock: newStock,
-          last_updated: new Date().toISOString(),
-        })
-        .eq("product_id", productId)
-
-      if (error) {
-        console.error("Stock update error:", error)
-        return false
-      }
-      return true
-    } catch (error) {
-      console.error("Stock update error:", error)
-      return false
-    }
+    const { supabase } = await getRestaurantId()
+    const { error } = await supabase.rpc("set_inventory_stock", {
+      target_product_id: productId,
+      new_stock: newStock,
+      change_reason: "Panel üzerinden stok düzeltmesi",
+    })
+    if (error) throw new Error(`Stok güncellenemedi: ${error.message}`)
+    return true
   },
 
   async getLowStockItems(): Promise<InventoryItem[]> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return []
-
-      const { data, error } = await supabase
-        .from("inventory")
-        .select(`
-          *,
-          products(name) 
-        `) // Join with products to get name
-        .filter("current_stock", "lte", "min_stock")
-
-      if (error) {
-        console.error("Low stock fetch error:", error)
-        return []
-      }
-
-      return (
-        data?.map((item) => ({
-          id: item.id,
-          productId: item.product_id,
-          currentStock: item.current_stock,
-          minStock: item.min_stock,
-          maxStock: item.max_stock,
-          unit: item.unit,
-          costPrice: item.cost_price,
-          supplierId: item.supplier_id,
-          lastUpdated: item.last_updated,
-          // productName: item.products?.name, // This would require a join
-        })) || []
-      )
-    } catch (error) {
-      console.error("Low stock fetch error:", error)
-      return []
-    }
+    return (await loadInventory()).filter((item) => item.currentStock <= item.minStock)
   },
 }
 
-// Products API
+async function resolveCategoryId(
+  categoryId: string | undefined,
+  categoryName: string | undefined,
+  restaurantId: string,
+): Promise<string | null> {
+  const supabase = getClientSupabaseInstance()
+  if (categoryId) return categoryId
+  const normalizedName = categoryName?.trim()
+  if (!normalizedName) return null
+
+  const { data: existing, error: readError } = await supabase
+    .from("categories")
+    .select("id")
+    .eq("restaurant_id", restaurantId)
+    .ilike("name", normalizedName)
+    .limit(1)
+    .maybeSingle()
+
+  if (readError) throw new Error(`Kategori aranamadı: ${readError.message}`)
+  if (existing) return existing.id
+
+  const { data: created, error: createError } = await supabase
+    .from("categories")
+    .insert({ restaurant_id: restaurantId, name: normalizedName })
+    .select("id")
+    .single()
+
+  if (createError) throw new Error(`Kategori oluşturulamadı: ${createError.message}`)
+  return created.id
+}
+
+async function loadProducts(requestedRestaurantId?: string): Promise<FoodItem[]> {
+  const { supabase, restaurantId } = await getRestaurantId(requestedRestaurantId)
+  const [productsResult, categoriesResult, inventoryResult] = await Promise.all([
+    supabase.from("products").select("*").eq("restaurant_id", restaurantId).order("created_at", { ascending: false }),
+    supabase.from("categories").select("id, name").eq("restaurant_id", restaurantId),
+    supabase.from("inventory_items").select("product_id, current_stock").eq("restaurant_id", restaurantId),
+  ])
+
+  if (productsResult.error) throw new Error(`Ürünler okunamadı: ${productsResult.error.message}`)
+  if (categoriesResult.error) throw new Error(`Kategoriler okunamadı: ${categoriesResult.error.message}`)
+  if (inventoryResult.error) throw new Error(`Stok miktarları okunamadı: ${inventoryResult.error.message}`)
+
+  const categoryNames = new Map(categoriesResult.data.map((category) => [category.id, category.name]))
+  const stockByProduct = new Map(inventoryResult.data.map((item) => [item.product_id, item.current_stock]))
+
+  return productsResult.data.map((product) => ({
+    id: product.id,
+    title: product.name,
+    description: product.description ?? "",
+    price: product.price,
+    image: product.image_url ?? "/placeholder.svg?height=160&width=320",
+    category: (product.category_id && categoryNames.get(product.category_id)) || "Diğer",
+    category_id: product.category_id ?? undefined,
+    available: product.is_available,
+    type: productKindToUi(product.kind),
+    discount: product.discount_percent,
+    stock: stockByProduct.get(product.id),
+    restaurant_id: product.restaurant_id,
+    costPrice: product.cost_price ?? undefined,
+    trackInventory: product.track_inventory,
+  }))
+}
+
+interface ProductPayload {
+  title: string
+  description?: string
+  price: number
+  image?: string
+  category_id?: string
+  category?: string
+  available: boolean
+  type: FoodItem["type"]
+  discount?: number
+  stock?: number
+  restaurant_id?: string
+}
+
 export const productsApi = {
-  async getAll(restaurant_id: string): Promise<FoodItem[]> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return []
+  getAll: loadProducts,
 
-      const { data, error } = await supabase
-        .from("products")
-        .select(`
-          *,
-          categories (name)
-        `)
-        .eq("restaurant_id", restaurant_id) // Filter by restaurant_id
-        .order("created_at", { ascending: false })
+  async create(productPayload: ProductPayload): Promise<FoodItem | null> {
+    const { supabase, restaurantId } = await getRestaurantId(productPayload.restaurant_id)
+    const categoryId = await resolveCategoryId(
+      productPayload.category_id,
+      productPayload.category,
+      restaurantId,
+    )
 
-      if (error) {
-        console.error("Products fetch error:", error)
-        return []
-      }
+    const { data, error } = await supabase
+      .from("products")
+      .insert({
+        restaurant_id: restaurantId,
+        name: productPayload.title.trim(),
+        description: productPayload.description?.trim() || null,
+        price: productPayload.price,
+        image_url: productPayload.image || null,
+        category_id: categoryId,
+        is_available: productPayload.available,
+        kind: productKindToDatabase(productPayload.type),
+        discount_percent: productPayload.discount ?? 0,
+        track_inventory: productPayload.stock !== undefined,
+      })
+      .select("id")
+      .single()
 
-      return (
-        data?.map((product) => ({
-          id: product.id,
-          title: product.name,
-          description: product.description || "",
-          price: product.price,
-          image: product.image_url || "/placeholder.svg?height=160&width=320",
-          category: product.categories?.name || "Diğer",
-          category_id: product.category_id, // Ensure this column exists and is fetched
-          available: product.is_available,
-          type: product.type as "Et" | "Vejeteryan",
-          discount: product.discount || 0,
-          stock: product.stock,
-          restaurant_id: product.restaurant_id, // Include restaurant_id in returned FoodItem
-        })) || []
-      )
-    } catch (error) {
-      console.error("Products fetch error:", error)
-      return []
-    }
-  },
+    if (error) throw new Error(`Ürün oluşturulamadı: ${error.message}`)
 
-  async create(productPayload: {
-    title: string
-    description?: string
-    price: number
-    image?: string
-    category_id: string
-    available: boolean
-    type: "Et" | "Vejeteryan"
-    discount?: number
-    stock?: number
-    restaurant_id: string
-  }): Promise<FoodItem | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
-
-      const { data, error } = await supabase
-        .from("products")
-        .insert({
-          name: productPayload.title,
-          description: productPayload.description,
-          price: productPayload.price,
-          image_url: productPayload.image,
-          category_id: productPayload.category_id,
-          is_available: productPayload.available,
-          type: productPayload.type,
-          discount: productPayload.discount,
-          stock: productPayload.stock,
-          restaurant_id: productPayload.restaurant_id, // Include restaurant_id in insert
-        })
-        .select(`*, categories (name)`)
-        .single()
-
-      if (error) {
-        console.error("Product create error:", error) // This is where the RLS error was caught
-        return null
-      }
-
-      // Create inventory entry for new product
-      await supabase.from("inventory").insert({
+    if (productPayload.stock !== undefined) {
+      const { error: inventoryError } = await supabase.from("inventory_items").insert({
+        restaurant_id: restaurantId,
         product_id: data.id,
-        current_stock: productPayload.stock || 0,
+        current_stock: productPayload.stock,
         min_stock: 5,
         max_stock: 100,
         unit: "adet",
-        // restaurant_id: productPayload.restaurant_id, // Consider if inventory also needs restaurant_id for RLS
       })
 
-      return {
-        id: data.id,
-        title: data.name,
-        description: data.description || "",
-        price: data.price,
-        image: data.image_url || "/placeholder.svg?height=160&width=320",
-        category: data.categories?.name || "Diğer",
-        category_id: data.category_id,
-        available: data.is_available,
-        type: data.type as "Et" | "Vejeteryan",
-        discount: data.discount || 0,
-        stock: data.stock,
-        restaurant_id: data.restaurant_id,
+      if (inventoryError) {
+        await supabase.from("products").delete().eq("id", data.id).eq("restaurant_id", restaurantId)
+        throw new Error(`Ürün stoğu oluşturulamadı: ${inventoryError.message}`)
       }
-    } catch (error) {
-      console.error("Product create error (catch):", error)
-      return null
     }
+
+    return (await loadProducts(restaurantId)).find((product) => product.id === data.id) ?? null
   },
 
   async update(
     productId: string,
-    productPayload: Partial<{
-      // Use Partial for updates, ensure restaurant_id is for filtering
-      title: string
-      description?: string
-      price: number
-      image?: string
-      category_id: string
-      available: boolean
-      type: "Et" | "Vejeteryan"
-      discount?: number
-      stock?: number
-    }>,
-    restaurant_id: string, // Pass restaurant_id for RLS check on update
+    productPayload: Partial<Omit<ProductPayload, "restaurant_id">>,
+    requestedRestaurantId?: string,
   ): Promise<FoodItem | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
+    const { supabase, restaurantId } = await getRestaurantId(requestedRestaurantId)
+    const updates: TablesUpdate<"products"> = {}
 
-      const updateData: { [key: string]: any } = {}
-      if (productPayload.title !== undefined) updateData.name = productPayload.title
-      if (productPayload.description !== undefined) updateData.description = productPayload.description
-      if (productPayload.price !== undefined) updateData.price = productPayload.price
-      if (productPayload.image !== undefined) updateData.image_url = productPayload.image
-      if (productPayload.category_id !== undefined) updateData.category_id = productPayload.category_id
-      if (productPayload.available !== undefined) updateData.is_available = productPayload.available
-      if (productPayload.type !== undefined) updateData.type = productPayload.type
-      if (productPayload.discount !== undefined) updateData.discount = productPayload.discount
-      if (productPayload.stock !== undefined) updateData.stock = productPayload.stock
-
-      if (Object.keys(updateData).length === 0) {
-        console.warn("Product update called with no data to update for product ID:", productId)
-        // Optionally fetch and return current product or error
-        const currentProduct = await this.getAll(restaurant_id).then((products) =>
-          products.find((p) => p.id === productId),
-        )
-        return currentProduct || null
-      }
-
-      const { data, error } = await supabase
-        .from("products")
-        .update(updateData)
-        .eq("id", productId)
-        .eq("restaurant_id", restaurant_id) // Ensure update is scoped to the restaurant
-        .select(`*, categories (name)`)
-        .single()
-
-      if (error) {
-        console.error("Product update error:", error)
-        return null
-      }
-
-      if (productPayload.stock !== undefined) {
-        await inventoryApi.updateStock(productId, productPayload.stock)
-      }
-
-      return {
-        id: data.id,
-        title: data.name,
-        description: data.description || "",
-        price: data.price,
-        image: data.image_url || "/placeholder.svg?height=160&width=320",
-        category: data.categories?.name || "Diğer",
-        category_id: data.category_id,
-        available: data.is_available,
-        type: data.type as "Et" | "Vejeteryan",
-        discount: data.discount || 0,
-        stock: data.stock,
-        restaurant_id: data.restaurant_id,
-      }
-    } catch (error) {
-      console.error("Product update error (catch):", error)
-      return null
+    if (productPayload.title !== undefined) updates.name = productPayload.title.trim()
+    if (productPayload.description !== undefined) updates.description = productPayload.description.trim() || null
+    if (productPayload.price !== undefined) updates.price = productPayload.price
+    if (productPayload.image !== undefined) updates.image_url = productPayload.image || null
+    if (productPayload.available !== undefined) updates.is_available = productPayload.available
+    if (productPayload.type !== undefined) updates.kind = productKindToDatabase(productPayload.type)
+    if (productPayload.discount !== undefined) updates.discount_percent = productPayload.discount
+    if (productPayload.category_id !== undefined || productPayload.category !== undefined) {
+      updates.category_id = await resolveCategoryId(
+        productPayload.category_id,
+        productPayload.category,
+        restaurantId,
+      )
     }
+    if (productPayload.stock !== undefined) updates.track_inventory = true
+
+    if (Object.keys(updates).length) {
+      const { error } = await supabase
+        .from("products")
+        .update(updates)
+        .eq("id", productId)
+        .eq("restaurant_id", restaurantId)
+      if (error) throw new Error(`Ürün güncellenemedi: ${error.message}`)
+    }
+
+    if (productPayload.stock !== undefined) {
+      const { data: inventory, error: inventoryReadError } = await supabase
+        .from("inventory_items")
+        .select("id")
+        .eq("restaurant_id", restaurantId)
+        .eq("product_id", productId)
+        .maybeSingle()
+
+      if (inventoryReadError) throw new Error(`Stok kaydı okunamadı: ${inventoryReadError.message}`)
+      if (inventory) {
+        await inventoryApi.updateStock(productId, productPayload.stock)
+      } else {
+        const { error: inventoryCreateError } = await supabase.from("inventory_items").insert({
+          restaurant_id: restaurantId,
+          product_id: productId,
+          current_stock: productPayload.stock,
+          min_stock: 5,
+          max_stock: 100,
+          unit: "adet",
+        })
+        if (inventoryCreateError) throw new Error(`Stok kaydı oluşturulamadı: ${inventoryCreateError.message}`)
+      }
+    }
+
+    return (await loadProducts(restaurantId)).find((product) => product.id === productId) ?? null
   },
 
-  async delete(productId: string, restaurant_id: string): Promise<boolean> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return false
-
-      await supabase.from("inventory").delete().eq("product_id", productId)
-
-      const { error } = await supabase.from("products").delete().eq("id", productId).eq("restaurant_id", restaurant_id) // Ensure delete is scoped to the restaurant
-
-      if (error) {
-        console.error("Product delete error:", error)
-        return false
-      }
-      return true
-    } catch (error) {
-      console.error("Product delete error (catch):", error)
-      return false
-    }
+  async delete(productId: string, requestedRestaurantId?: string): Promise<boolean> {
+    const { supabase, restaurantId } = await getRestaurantId(requestedRestaurantId)
+    const { error } = await supabase
+      .from("products")
+      .delete()
+      .eq("id", productId)
+      .eq("restaurant_id", restaurantId)
+    if (error) throw new Error(`Ürün silinemedi: ${error.message}`)
+    return true
   },
 }
 
-// Tables API (existing)
-export const tablesApi = {
-  async getAll(): Promise<Table[]> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return []
+async function loadTables(requestedRestaurantId?: string): Promise<Table[]> {
+  const { supabase, restaurantId } = await getRestaurantId(requestedRestaurantId)
+  const [tablesResult, ordersResult] = await Promise.all([
+    supabase.from("restaurant_tables").select("*").eq("restaurant_id", restaurantId).order("number"),
+    supabase.from("orders").select("id, table_id, customer_name, status").eq("restaurant_id", restaurantId),
+  ])
 
-      const { data, error } = await supabase.from("tables").select("*").order("number")
+  if (tablesResult.error) throw new Error(`Masalar okunamadı: ${tablesResult.error.message}`)
+  if (ordersResult.error) throw new Error(`Masa siparişleri okunamadı: ${ordersResult.error.message}`)
 
-      if (error) {
-        console.error("Tables fetch error:", error)
-        return []
-      }
+  const activeOrderByTable = new Map(
+    ordersResult.data
+      .filter((order) => order.table_id && order.status !== "completed" && order.status !== "cancelled")
+      .map((order) => [order.table_id as string, order]),
+  )
 
-      return (
-        data?.map((table) => ({
-          id: table.id,
-          number: table.number,
-          capacity: table.capacity,
-          status: table.status as "Müsait" | "Dolu" | "Rezerve",
-          section: table.section,
-          customer: table.customer_name,
-          currentOrderId: table.current_order_id,
-          position: { x: table.position_x || 100, y: table.position_y || 100 },
-        })) || []
-      )
-    } catch (error) {
-      console.error("Tables fetch error:", error)
-      return []
+  return tablesResult.data.map((table) => {
+    const currentOrder = activeOrderByTable.get(table.id)
+    return {
+      id: table.id,
+      number: table.number,
+      capacity: table.capacity,
+      status: tableStatusToUi[table.status],
+      section: table.section ?? undefined,
+      customer: currentOrder?.customer_name ?? undefined,
+      currentOrderId: currentOrder?.id,
+      position:
+        table.position_x !== null && table.position_y !== null
+          ? { x: table.position_x, y: table.position_y }
+          : undefined,
+      restaurant_id: table.restaurant_id,
     }
-  },
+  })
+}
+
+export const tablesApi = {
+  getAll: loadTables,
 
   async create(table: { number: string; capacity: number; section: string }): Promise<Table | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
+    const { supabase, restaurantId } = await getRestaurantId()
+    const { data, error } = await supabase
+      .from("restaurant_tables")
+      .insert({
+        restaurant_id: restaurantId,
+        number: table.number.trim(),
+        capacity: table.capacity,
+        section: table.section.trim() || null,
+        position_x: 100,
+        position_y: 100,
+      })
+      .select("id")
+      .single()
 
-      const { data, error } = await supabase
-        .from("tables")
-        .insert({
-          number: table.number,
-          capacity: table.capacity,
-          section: table.section,
-          status: "Müsait",
-          position_x: 100,
-          position_y: 100,
-        })
-        .select()
-        .single()
-
-      if (error) {
-        console.error("Table create error:", error)
-        return null
-      }
-
-      return {
-        id: data.id,
-        number: data.number,
-        capacity: data.capacity,
-        status: "Müsait",
-        section: data.section,
-        position: { x: data.position_x || 100, y: data.position_y || 100 },
-      }
-    } catch (error) {
-      console.error("Table create error:", error)
-      return null
-    }
+    if (error) throw new Error(`Masa oluşturulamadı: ${error.message}`)
+    return (await loadTables(restaurantId)).find((item) => item.id === data.id) ?? null
   },
 
   async update(id: string, updates: Partial<Table>): Promise<Table | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
-
-      const { data, error } = await supabase
-        .from("tables")
-        .update({
-          number: updates.number,
-          capacity: updates.capacity,
-          section: updates.section,
-          status: updates.status,
-          customer_name: updates.customer,
-          current_order_id: updates.currentOrderId,
-          position_x: updates.position?.x,
-          position_y: updates.position?.y,
-        })
-        .eq("id", id)
-        .select()
-        .single()
-
-      if (error) {
-        console.error("Table update error:", error)
-        return null
-      }
-
-      return {
-        id: data.id,
-        number: data.number,
-        capacity: data.capacity,
-        status: data.status as "Müsait" | "Dolu" | "Rezerve",
-        section: data.section,
-        customer: data.customer_name,
-        currentOrderId: data.current_order_id,
-        position: { x: data.position_x || 100, y: data.position_y || 100 },
-      }
-    } catch (error) {
-      console.error("Table update error:", error)
-      return null
+    const { supabase, restaurantId } = await getRestaurantId()
+    const databaseUpdates: TablesUpdate<"restaurant_tables"> = {}
+    if (updates.number !== undefined) databaseUpdates.number = updates.number.trim()
+    if (updates.capacity !== undefined) databaseUpdates.capacity = updates.capacity
+    if (updates.section !== undefined) databaseUpdates.section = updates.section || null
+    if (updates.status !== undefined) databaseUpdates.status = tableStatusToDatabase[updates.status]
+    if (updates.position !== undefined) {
+      databaseUpdates.position_x = updates.position.x
+      databaseUpdates.position_y = updates.position.y
     }
+
+    const { error } = await supabase
+      .from("restaurant_tables")
+      .update(databaseUpdates)
+      .eq("id", id)
+      .eq("restaurant_id", restaurantId)
+    if (error) throw new Error(`Masa güncellenemedi: ${error.message}`)
+    return (await loadTables(restaurantId)).find((table) => table.id === id) ?? null
   },
 
   async delete(id: string): Promise<boolean> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return false
-
-      const { error } = await supabase.from("tables").delete().eq("id", id)
-
-      if (error) {
-        console.error("Table delete error:", error)
-        return false
-      }
-      return true
-    } catch (error) {
-      console.error("Table delete error:", error)
-      return false
-    }
+    const { supabase, restaurantId } = await getRestaurantId()
+    const { error } = await supabase
+      .from("restaurant_tables")
+      .delete()
+      .eq("id", id)
+      .eq("restaurant_id", restaurantId)
+    if (error) throw new Error(`Masa silinemedi: ${error.message}`)
+    return true
   },
 }
 
-// Reservations API (existing)
+type ReservationInput = Omit<Reservation, "id"> & { time?: string }
+
+function combineReservationDate(date: Date, time?: string) {
+  const startsAt = new Date(date)
+  if (time) {
+    const [hours, minutes] = time.split(":").map(Number)
+    if (Number.isFinite(hours) && Number.isFinite(minutes)) startsAt.setHours(hours, minutes, 0, 0)
+  }
+  return startsAt
+}
+
+async function findTableId(restaurantId: string, tableNumber?: string): Promise<string | null> {
+  if (!tableNumber?.trim()) return null
+  const supabase = getClientSupabaseInstance()
+  const { data, error } = await supabase
+    .from("restaurant_tables")
+    .select("id")
+    .eq("restaurant_id", restaurantId)
+    .eq("number", tableNumber.trim())
+    .maybeSingle()
+  if (error) throw new Error(`Rezervasyon masası aranamadı: ${error.message}`)
+  return data?.id ?? null
+}
+
+async function loadReservations(requestedRestaurantId?: string): Promise<Reservation[]> {
+  const { supabase, restaurantId } = await getRestaurantId(requestedRestaurantId)
+  const [reservationsResult, tablesResult] = await Promise.all([
+    supabase.from("reservations").select("*").eq("restaurant_id", restaurantId).order("starts_at"),
+    supabase.from("restaurant_tables").select("id, number").eq("restaurant_id", restaurantId),
+  ])
+
+  if (reservationsResult.error) throw new Error(`Rezervasyonlar okunamadı: ${reservationsResult.error.message}`)
+  if (tablesResult.error) throw new Error(`Masa adları okunamadı: ${tablesResult.error.message}`)
+
+  const tableNumbers = new Map(tablesResult.data.map((table) => [table.id, table.number]))
+  return reservationsResult.data.map((reservation) => ({
+    id: reservation.id,
+    customerName: reservation.customer_name,
+    date: new Date(reservation.starts_at),
+    people: reservation.party_size,
+    tableId: reservation.table_id ?? undefined,
+    tableNumber: reservation.table_id ? tableNumbers.get(reservation.table_id) : undefined,
+    phone: reservation.customer_phone,
+    email: reservation.customer_email ?? undefined,
+    notes: reservation.notes ?? undefined,
+    status: reservationStatusToUi[reservation.status],
+  }))
+}
+
 export const reservationsApi = {
-  async getAll(): Promise<Reservation[]> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return []
+  getAll: loadReservations,
 
-      const { data, error } = await supabase
-        .from("reservations")
-        .select("*")
-        .order("reservation_date", { ascending: true })
+  async create(reservation: ReservationInput): Promise<Reservation | null> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const tableId = reservation.tableId ?? (await findTableId(restaurantId, reservation.tableNumber))
+    const { data, error } = await supabase
+      .from("reservations")
+      .insert({
+        restaurant_id: restaurantId,
+        table_id: tableId,
+        customer_name: reservation.customerName.trim(),
+        customer_phone: reservation.phone.trim(),
+        customer_email: reservation.email?.trim() || null,
+        party_size: reservation.people,
+        starts_at: combineReservationDate(reservation.date, reservation.time).toISOString(),
+        status: reservationStatusToDatabase[reservation.status],
+        notes: reservation.notes?.trim() || null,
+      })
+      .select("id")
+      .single()
 
-      if (error) {
-        console.error("Reservations fetch error:", error)
-        return []
-      }
-
-      return (
-        data?.map((reservation) => ({
-          id: reservation.id,
-          customerName: reservation.customer_name,
-          date: new Date(reservation.reservation_date),
-          people: reservation.people,
-          tableNumber: reservation.table_number,
-          phone: reservation.customer_phone,
-          notes: reservation.notes,
-          status: reservation.status as "Onaylandı" | "Beklemede" | "İptal",
-        })) || []
-      )
-    } catch (error) {
-      console.error("Reservations fetch error:", error)
-      return []
-    }
+    if (error) throw new Error(`Rezervasyon oluşturulamadı: ${error.message}`)
+    return (await loadReservations(restaurantId)).find((item) => item.id === data.id) ?? null
   },
 
-  async create(reservation: Omit<Reservation, "id">): Promise<Reservation | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
+  async update(id: string, reservation: Partial<ReservationInput>): Promise<Reservation | null> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const { data: current, error: currentError } = await supabase
+      .from("reservations")
+      .select("starts_at")
+      .eq("restaurant_id", restaurantId)
+      .eq("id", id)
+      .single()
+    if (currentError) throw new Error(`Rezervasyon okunamadı: ${currentError.message}`)
 
-      const { data, error } = await supabase
-        .from("reservations")
-        .insert({
-          customer_name: reservation.customerName,
-          customer_phone: reservation.phone,
-          people: reservation.people,
-          reservation_date: reservation.date.toISOString(),
-          table_number: reservation.tableNumber,
-          notes: reservation.notes,
-          status: reservation.status,
-        })
-        .select()
-        .single()
-
-      if (error) {
-        console.error("Reservation create error:", error)
-        return null
-      }
-
-      return {
-        id: data.id,
-        customerName: data.customer_name,
-        date: new Date(data.reservation_date),
-        people: data.people,
-        tableNumber: data.table_number,
-        phone: data.customer_phone,
-        notes: data.notes,
-        status: data.status as "Onaylandı" | "Beklemede" | "İptal",
-      }
-    } catch (error) {
-      console.error("Reservation create error:", error)
-      return null
+    const updates: TablesUpdate<"reservations"> = {}
+    if (reservation.customerName !== undefined) updates.customer_name = reservation.customerName.trim()
+    if (reservation.phone !== undefined) updates.customer_phone = reservation.phone.trim()
+    if (reservation.email !== undefined) updates.customer_email = reservation.email.trim() || null
+    if (reservation.people !== undefined) updates.party_size = reservation.people
+    if (reservation.notes !== undefined) updates.notes = reservation.notes.trim() || null
+    if (reservation.status !== undefined) updates.status = reservationStatusToDatabase[reservation.status]
+    if (reservation.tableId !== undefined || reservation.tableNumber !== undefined) {
+      updates.table_id = reservation.tableId ?? (await findTableId(restaurantId, reservation.tableNumber))
     }
-  },
-
-  async update(id: string, reservation: Partial<Reservation>): Promise<Reservation | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
-
-      const { data, error } = await supabase
-        .from("reservations")
-        .update({
-          customer_name: reservation.customerName,
-          customer_phone: reservation.phone,
-          people: reservation.people,
-          reservation_date: reservation.date?.toISOString(),
-          table_number: reservation.tableNumber,
-          notes: reservation.notes,
-          status: reservation.status,
-        })
-        .eq("id", id)
-        .select()
-        .single()
-
-      if (error) {
-        console.error("Reservation update error:", error)
-        return null
-      }
-
-      return {
-        id: data.id,
-        customerName: data.customer_name,
-        date: new Date(data.reservation_date),
-        people: data.people,
-        tableNumber: data.table_number,
-        phone: data.customer_phone,
-        notes: data.notes,
-        status: data.status as "Onaylandı" | "Beklemede" | "İptal",
-      }
-    } catch (error) {
-      console.error("Reservation update error:", error)
-      return null
+    if (reservation.date !== undefined || reservation.time !== undefined) {
+      updates.starts_at = combineReservationDate(
+        reservation.date ?? new Date(current.starts_at),
+        reservation.time,
+      ).toISOString()
     }
+
+    const { error } = await supabase
+      .from("reservations")
+      .update(updates)
+      .eq("id", id)
+      .eq("restaurant_id", restaurantId)
+    if (error) throw new Error(`Rezervasyon güncellenemedi: ${error.message}`)
+    return (await loadReservations(restaurantId)).find((item) => item.id === id) ?? null
   },
 
   async delete(id: string): Promise<boolean> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return false
-
-      const { error } = await supabase.from("reservations").delete().eq("id", id)
-
-      if (error) {
-        console.error("Reservation delete error:", error)
-        return false
-      }
-      return true
-    } catch (error) {
-      console.error("Reservation delete error:", error)
-      return false
-    }
+    const { supabase, restaurantId } = await getRestaurantId()
+    const { error } = await supabase.from("reservations").delete().eq("id", id).eq("restaurant_id", restaurantId)
+    if (error) throw new Error(`Rezervasyon silinemedi: ${error.message}`)
+    return true
   },
 }
 
-// Categories API
 export const categoriesApi = {
-  async getAll(): Promise<string[]> {
-    // Returns string array for compatibility with app/page.tsx
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return []
+  async getAll(requestedRestaurantId?: string): Promise<string[]> {
+    return (await this.getDetailed(requestedRestaurantId)).map((category) => category.name)
+  },
 
-      // Fetch from 'categories' table
-      const { data, error } = await supabase.from("categories").select("name").order("name", { ascending: true })
-
-      if (error) {
-        console.error("Categories fetch error:", error)
-        return []
-      }
-
-      // Map to array of names
-      const categoryNames = data?.map((category: { name: string }) => category.name).filter(Boolean) || []
-      return categoryNames
-    } catch (error) {
-      console.error("Categories fetch error (catch):", error)
-      return []
-    }
+  async getDetailed(requestedRestaurantId?: string): Promise<Category[]> {
+    const { supabase, restaurantId } = await getRestaurantId(requestedRestaurantId)
+    const { data, error } = await supabase
+      .from("categories")
+      .select("*")
+      .eq("restaurant_id", restaurantId)
+      .eq("is_active", true)
+      .order("sort_order")
+    if (error) throw new Error(`Kategoriler okunamadı: ${error.message}`)
+    return data.map((category) => ({
+      id: category.id,
+      name: category.name,
+      description: category.description ?? undefined,
+      icon: category.icon ?? undefined,
+      sortOrder: category.sort_order,
+      active: category.is_active,
+      restaurant_id: category.restaurant_id,
+    }))
   },
 }
 
-// Suppliers API
+async function loadSuppliers(requestedRestaurantId?: string): Promise<Supplier[]> {
+  const { supabase, restaurantId } = await getRestaurantId(requestedRestaurantId)
+  const { data, error } = await supabase
+    .from("suppliers")
+    .select("*")
+    .eq("restaurant_id", restaurantId)
+    .order("name")
+  if (error) throw new Error(`Tedarikçiler okunamadı: ${error.message}`)
+  return data.map((supplier) => ({
+    id: supplier.id,
+    name: supplier.name,
+    contact_name: supplier.contact_name ?? undefined,
+    phone: supplier.phone ?? undefined,
+    email: supplier.email ?? undefined,
+    address: supplier.address ?? undefined,
+    restaurant_id: supplier.restaurant_id,
+    created_at: supplier.created_at,
+    updated_at: supplier.updated_at,
+  }))
+}
+
 export const suppliersApi = {
-  async getAll(restaurant_id: string): Promise<Supplier[]> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return []
+  getAll: loadSuppliers,
 
-      const { data, error } = await supabase
-        .from("suppliers")
-        .select("*")
-        .eq("restaurant_id", restaurant_id)
-        .order("name", { ascending: true })
-
-      if (error) {
-        console.error("Suppliers fetch error:", error)
-        return []
-      }
-      return data || []
-    } catch (error) {
-      console.error("Suppliers fetch error (catch):", error)
-      return []
-    }
-  },
-
-  async getById(supplierId: string, restaurant_id: string): Promise<Supplier | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
-
-      const { data, error } = await supabase
-        .from("suppliers")
-        .select("*")
-        .eq("id", supplierId)
-        .eq("restaurant_id", restaurant_id)
-        .single()
-
-      if (error) {
-        console.error("Supplier fetch by ID error:", error)
-        return null
-      }
-      return data
-    } catch (error) {
-      console.error("Supplier fetch by ID error (catch):", error)
-      return null
-    }
+  async getById(supplierId: string, requestedRestaurantId?: string): Promise<Supplier | null> {
+    return (await loadSuppliers(requestedRestaurantId)).find((supplier) => supplier.id === supplierId) ?? null
   },
 
   async create(supplierData: {
@@ -1036,170 +911,445 @@ export const suppliersApi = {
     phone?: string | null
     email?: string | null
     address?: string | null
-    restaurant_id: string
+    restaurant_id?: string
   }): Promise<Supplier | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
-
-      const { data, error } = await supabase
-        .from("suppliers")
-        .insert({
-          name: supplierData.name,
-          contact_name: supplierData.contact_name,
-          phone: supplierData.phone,
-          email: supplierData.email,
-          address: supplierData.address,
-          restaurant_id: supplierData.restaurant_id,
-        })
-        .select()
-        .single()
-
-      if (error) {
-        console.error("Supplier create error:", error)
-        return null
-      }
-      return data
-    } catch (error) {
-      console.error("Supplier create error (catch):", error)
-      return null
-    }
+    const { supabase, restaurantId } = await getRestaurantId(supplierData.restaurant_id)
+    const { data, error } = await supabase
+      .from("suppliers")
+      .insert({
+        restaurant_id: restaurantId,
+        name: supplierData.name.trim(),
+        contact_name: supplierData.contact_name?.trim() || null,
+        phone: supplierData.phone?.trim() || null,
+        email: supplierData.email?.trim() || null,
+        address: supplierData.address?.trim() || null,
+      })
+      .select("id")
+      .single()
+    if (error) throw new Error(`Tedarikçi oluşturulamadı: ${error.message}`)
+    return (await loadSuppliers(restaurantId)).find((supplier) => supplier.id === data.id) ?? null
   },
 
   async update(
     supplierId: string,
-    updates: Partial<{
-      name: string
-      contact_name?: string | null
-      phone?: string | null
-      email?: string | null
-      address?: string | null
-    }>,
-    restaurant_id: string,
+    supplierData: Partial<Pick<Supplier, "name" | "contact_name" | "phone" | "email" | "address">>,
+    requestedRestaurantId?: string,
   ): Promise<Supplier | null> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return null
+    const { supabase, restaurantId } = await getRestaurantId(requestedRestaurantId)
+    const updates: TablesUpdate<"suppliers"> = {}
+    if (supplierData.name !== undefined) updates.name = supplierData.name.trim()
+    if (supplierData.contact_name !== undefined) updates.contact_name = supplierData.contact_name?.trim() || null
+    if (supplierData.phone !== undefined) updates.phone = supplierData.phone?.trim() || null
+    if (supplierData.email !== undefined) updates.email = supplierData.email?.trim() || null
+    if (supplierData.address !== undefined) updates.address = supplierData.address?.trim() || null
 
-      const { data, error } = await supabase
-        .from("suppliers")
-        .update(updates)
-        .eq("id", supplierId)
-        .eq("restaurant_id", restaurant_id) // Ensure update is scoped
-        .select()
-        .single()
-
-      if (error) {
-        console.error("Supplier update error:", error)
-        return null
-      }
-      return data
-    } catch (error) {
-      console.error("Supplier update error (catch):", error)
-      return null
-    }
+    const { error } = await supabase
+      .from("suppliers")
+      .update(updates)
+      .eq("id", supplierId)
+      .eq("restaurant_id", restaurantId)
+    if (error) throw new Error(`Tedarikçi güncellenemedi: ${error.message}`)
+    return (await loadSuppliers(restaurantId)).find((supplier) => supplier.id === supplierId) ?? null
   },
 
-  async delete(supplierId: string, restaurant_id: string): Promise<boolean> {
-    try {
-      const supabase = getSupabase()
-      if (!supabase) return false
-
-      const { error } = await supabase
-        .from("suppliers")
-        .delete()
-        .eq("id", supplierId)
-        .eq("restaurant_id", restaurant_id) // Ensure delete is scoped
-
-      if (error) {
-        console.error("Supplier delete error:", error)
-        return false
-      }
-      return true
-    } catch (error) {
-      console.error("Supplier delete error (catch):", error)
-      return false
-    }
+  async delete(supplierId: string, requestedRestaurantId?: string): Promise<boolean> {
+    const { supabase, restaurantId } = await getRestaurantId(requestedRestaurantId)
+    const { error } = await supabase
+      .from("suppliers")
+      .delete()
+      .eq("id", supplierId)
+      .eq("restaurant_id", restaurantId)
+    if (error) throw new Error(`Tedarikçi silinemedi: ${error.message}`)
+    return true
   },
 }
 
-// Legacy functions for backward compatibility
-export const getPosts = async () => {
-  if (!isSupabaseConfigured()) {
-    console.warn(
-      "Supabase is not configured. Make sure to set the SUPABASE_URL and SUPABASE_ANON_KEY environment variables.",
-    )
-    return []
-  }
-
-  const supabase = getClientSupabaseInstance()
-
-  const { data: posts, error } = await supabase.from("posts").select("*").order("created_at", { ascending: false })
-
-  if (error) {
-    console.error("Error fetching posts:", error)
-    return []
-  }
-
-  return posts || []
+const memberRoleLabels: Record<MemberRole, "Yönetici" | "Garson" | "Şef" | "Kasiyer" | "Kurye"> = {
+  owner: "Yönetici",
+  manager: "Yönetici",
+  waiter: "Garson",
+  kitchen: "Şef",
+  cashier: "Kasiyer",
+  courier: "Kurye",
 }
 
-export const createPost = async (title: string, content: string) => {
-  if (!isSupabaseConfigured()) {
-    console.warn(
-      "Supabase is not configured. Make sure to set the SUPABASE_URL and SUPABASE_ANON_KEY environment variables.",
-    )
-    return null
-  }
-
-  const supabase = getClientSupabaseInstance()
-
-  const { data, error } = await supabase.from("posts").insert([{ title, content }]).select()
-
-  if (error) {
-    console.error("Error creating post:", error)
-    return null
-  }
-
-  return data ? data[0] : null
+export interface RestaurantMember {
+  id: string
+  name: string
+  email: string
+  avatar?: string
+  role: MemberRole
+  roleLabel: (typeof memberRoleLabels)[MemberRole]
+  joinedAt?: Date
 }
 
-export const updatePost = async (id: string, title: string, content: string) => {
-  if (!isSupabaseConfigured()) {
-    console.warn(
-      "Supabase is not configured. Make sure to set the SUPABASE_URL and SUPABASE_ANON_KEY environment variables.",
-    )
-    return null
-  }
-
-  const supabase = getClientSupabaseInstance()
-
-  const { data, error } = await supabase.from("posts").update({ title, content }).eq("id", id).select()
-
-  if (error) {
-    console.error("Error updating post:", error)
-    return null
-  }
-
-  return data ? data[0] : null
+export interface RestaurantInvitation {
+  token: string
+  email: string
+  role: MemberRole
+  restaurantName?: string
+  expiresAt: Date
 }
 
-export const deletePost = async (id: string) => {
-  if (!isSupabaseConfigured()) {
-    console.warn(
-      "Supabase is not configured. Make sure to set the SUPABASE_URL and SUPABASE_ANON_KEY environment variables.",
-    )
-    return null
-  }
+export const membersApi = {
+  async getAll(): Promise<RestaurantMember[]> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const { data: members, error: membersError } = await supabase
+      .from("restaurant_members")
+      .select("user_id, role, joined_at")
+      .eq("restaurant_id", restaurantId)
+      .eq("status", "active")
+      .order("created_at")
 
-  const supabase = getClientSupabaseInstance()
+    if (membersError) throw new Error(`Ekip üyeleri okunamadı: ${membersError.message}`)
+    if (!members.length) return []
 
-  const { error } = await supabase.from("posts").delete().eq("id", id)
+    const { data: profiles, error: profilesError } = await supabase
+      .from("profiles")
+      .select("id, email, full_name, avatar_url")
+      .in(
+        "id",
+        members.map((member) => member.user_id),
+      )
+    if (profilesError) throw new Error(`Üye profilleri okunamadı: ${profilesError.message}`)
 
-  if (error) {
-    console.error("Error deleting post:", error)
-    return false
-  }
+    const profilesById = new Map(profiles.map((profile) => [profile.id, profile]))
+    return members.map((member) => {
+      const profile = profilesById.get(member.user_id)
+      return {
+        id: member.user_id,
+        name: profile?.full_name || profile?.email || "Kullanıcı",
+        email: profile?.email || "",
+        avatar: profile?.avatar_url ?? undefined,
+        role: member.role,
+        roleLabel: memberRoleLabels[member.role],
+        joinedAt: member.joined_at ? new Date(member.joined_at) : undefined,
+      }
+    })
+  },
 
-  return true
+  async createInvitation(email: string, role: MemberRole): Promise<RestaurantInvitation> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const { data: token, error } = await supabase.rpc("create_restaurant_invitation", {
+      target_restaurant_id: restaurantId,
+      invite_email: email.trim().toLowerCase(),
+      invite_role: role,
+    })
+    if (error) throw new Error(`Davet oluşturulamadı: ${error.message}`)
+
+    const details = await this.getInvitation(token)
+    if (!details) throw new Error("Davet oluşturuldu ancak ayrıntıları okunamadı")
+    return details
+  },
+
+  async getInvitation(token: string): Promise<RestaurantInvitation | null> {
+    const supabase = getClientSupabaseInstance()
+    const { data, error } = await supabase.rpc("get_restaurant_invitation", {
+      invitation_token: token,
+    })
+    if (error) throw new Error(`Davet okunamadı: ${error.message}`)
+    const invitation = data[0]
+    if (!invitation) return null
+
+    return {
+      token,
+      email: invitation.email,
+      role: invitation.role,
+      restaurantName: invitation.restaurant_name,
+      expiresAt: new Date(invitation.expires_at),
+    }
+  },
+
+  async acceptInvitation(token: string): Promise<string> {
+    const supabase = getClientSupabaseInstance()
+    const { data, error } = await supabase.rpc("accept_restaurant_invitation", {
+      invitation_token: token,
+    })
+    if (error) throw new Error(`Davet kabul edilemedi: ${error.message}`)
+    return data
+  },
+
+  async updateRole(userId: string, role: MemberRole): Promise<boolean> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const { error } = await supabase.rpc("set_restaurant_member_role", {
+      target_restaurant_id: restaurantId,
+      target_user_id: userId,
+      next_role: role,
+    })
+    if (error) throw new Error(`Üye rolü güncellenemedi: ${error.message}`)
+    return true
+  },
+
+  async remove(userId: string): Promise<boolean> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const { error } = await supabase.rpc("remove_restaurant_member", {
+      target_restaurant_id: restaurantId,
+      target_user_id: userId,
+    })
+    if (error) throw new Error(`Üye kaldırılamadı: ${error.message}`)
+    return true
+  },
+}
+
+function toUiVehicleType(value?: string | null): Courier["vehicleType"] {
+  if (value === "car") return "Araba"
+  if (value === "bicycle") return "Bisiklet"
+  return "Motorsiklet"
+}
+
+const vehicleTypeToDatabase: Record<Courier["vehicleType"], "motorcycle" | "car" | "bicycle"> = {
+  Motorsiklet: "motorcycle",
+  Araba: "car",
+  Bisiklet: "bicycle",
+}
+
+export const couriersApi = {
+  async getAll(): Promise<Courier[]> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const [membersResult, courierProfilesResult, deliveriesResult] = await Promise.all([
+      supabase
+        .from("restaurant_members")
+        .select("user_id, joined_at")
+        .eq("restaurant_id", restaurantId)
+        .eq("role", "courier")
+        .eq("status", "active"),
+      supabase.from("courier_profiles").select("*").eq("restaurant_id", restaurantId),
+      supabase.from("deliveries").select("*").eq("restaurant_id", restaurantId),
+    ])
+
+    if (membersResult.error) throw new Error(`Kuryeler okunamadı: ${membersResult.error.message}`)
+    if (courierProfilesResult.error) throw new Error(`Kurye profilleri okunamadı: ${courierProfilesResult.error.message}`)
+    if (deliveriesResult.error) throw new Error(`Kurye teslimatları okunamadı: ${deliveriesResult.error.message}`)
+    if (!membersResult.data.length) return []
+
+    const { data: profiles, error: profilesError } = await supabase
+      .from("profiles")
+      .select("id, email, full_name, phone, avatar_url")
+      .in(
+        "id",
+        membersResult.data.map((member) => member.user_id),
+      )
+    if (profilesError) throw new Error(`Kurye kullanıcıları okunamadı: ${profilesError.message}`)
+
+    const profileById = new Map(profiles.map((profile) => [profile.id, profile]))
+    const courierProfileById = new Map(courierProfilesResult.data.map((profile) => [profile.user_id, profile]))
+
+    return membersResult.data.map((member) => {
+      const profile = profileById.get(member.user_id)
+      const courierProfile = courierProfileById.get(member.user_id)
+      const courierDeliveries = deliveriesResult.data.filter((delivery) => delivery.courier_user_id === member.user_id)
+      const activeDelivery = courierDeliveries.find((delivery) =>
+        (["assigned", "en_route"] as DeliveryStatus[]).includes(delivery.status),
+      )
+      const status: Courier["status"] =
+        activeDelivery?.status === "en_route" ? "Teslimatta" : activeDelivery ? "Siparişte" : "Müsait"
+
+      return {
+        id: member.user_id,
+        name: courierProfile?.display_name || profile?.full_name || profile?.email || "Kurye",
+        email: profile?.email ?? undefined,
+        phone: courierProfile?.phone || profile?.phone || "",
+        status,
+        avatar: profile?.avatar_url ?? undefined,
+        vehicleType: toUiVehicleType(courierProfile?.vehicle_type),
+        vehiclePlate: courierProfile?.vehicle_plate ?? undefined,
+        activeFrom: new Date(member.joined_at || courierProfile?.created_at || Date.now()),
+        totalDeliveries: courierDeliveries.filter((delivery) => delivery.status === "delivered").length,
+        currentOrderId: activeDelivery?.order_id,
+        location:
+          activeDelivery && activeDelivery.courier_lat !== null && activeDelivery.courier_lng !== null
+            ? { lat: activeDelivery.courier_lat, lng: activeDelivery.courier_lng }
+            : undefined,
+      }
+    })
+  },
+
+  async updateProfile(
+    userId: string,
+    updates: Partial<Pick<Courier, "name" | "phone" | "vehicleType" | "vehiclePlate">>,
+  ): Promise<void> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const databaseUpdates: TablesUpdate<"courier_profiles"> = {}
+    if (updates.name !== undefined) databaseUpdates.display_name = updates.name.trim() || null
+    if (updates.phone !== undefined) databaseUpdates.phone = updates.phone.trim() || null
+    if (updates.vehicleType !== undefined) databaseUpdates.vehicle_type = vehicleTypeToDatabase[updates.vehicleType]
+    if (updates.vehiclePlate !== undefined) databaseUpdates.vehicle_plate = updates.vehiclePlate.trim() || null
+
+    const { error } = await supabase
+      .from("courier_profiles")
+      .update(databaseUpdates)
+      .eq("restaurant_id", restaurantId)
+      .eq("user_id", userId)
+    if (error) throw new Error(`Kurye profili güncellenemedi: ${error.message}`)
+  },
+
+  async createInvitation(
+    courier: Pick<Courier, "name" | "email" | "phone" | "vehicleType" | "vehiclePlate">,
+  ): Promise<string> {
+    if (!courier.email) throw new Error("Kurye daveti için e-posta adresi gereklidir")
+    const { supabase, restaurantId } = await getRestaurantId()
+    const { data, error } = await supabase.rpc("create_courier_invitation", {
+      target_restaurant_id: restaurantId,
+      invite_email: courier.email.trim().toLowerCase(),
+      courier_name: courier.name.trim(),
+      courier_phone: courier.phone.trim(),
+      courier_vehicle_type: vehicleTypeToDatabase[courier.vehicleType],
+      courier_vehicle_plate: courier.vehiclePlate?.trim() || undefined,
+    })
+    if (error) throw new Error(`Kurye daveti oluşturulamadı: ${error.message}`)
+    return data
+  },
+
+  async assignOrder(courierId: string, orderId: string): Promise<void> {
+    const { supabase } = await getRestaurantId()
+    const { error } = await supabase.rpc("assign_delivery_courier", {
+      target_order_id: orderId,
+      target_courier_user_id: courierId,
+    })
+    if (error) throw new Error(`Kurye atanamadı: ${error.message}`)
+  },
+
+  async updateLocation(orderId: string, lat: number, lng: number): Promise<void> {
+    const { supabase } = await getRestaurantId()
+    const { error } = await supabase.rpc("set_delivery_status", {
+      target_order_id: orderId,
+      next_status: "en_route",
+      current_lat: lat,
+      current_lng: lng,
+    })
+    if (error) throw new Error(`Kurye konumu güncellenemedi: ${error.message}`)
+  },
+
+  async completeDelivery(orderId: string): Promise<void> {
+    const { supabase } = await getRestaurantId()
+    const { error } = await supabase.rpc("set_delivery_status", {
+      target_order_id: orderId,
+      next_status: "delivered",
+    })
+    if (error) throw new Error(`Teslimat tamamlanamadı: ${error.message}`)
+  },
+}
+
+export interface AppNotification {
+  id: string
+  title: string
+  message: string
+  type: "info" | "success" | "warning" | "error"
+  read: boolean
+  timestamp: Date
+  relatedOrderId?: string
+}
+
+function toNotificationType(value: string): AppNotification["type"] {
+  if (value === "success" || value === "warning" || value === "error") return value
+  return "info"
+}
+
+export const notificationsApi = {
+  async getAll(): Promise<AppNotification[]> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+    if (userError || !user) throw new Error("Bildirim kullanıcısı doğrulanamadı")
+
+    const { data, error } = await supabase
+      .from("notifications")
+      .select("*")
+      .eq("restaurant_id", restaurantId)
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(100)
+    if (error) throw new Error(`Bildirimler okunamadı: ${error.message}`)
+
+    return data.map((notification) => ({
+      id: notification.id,
+      title: notification.title,
+      message: notification.message,
+      type: toNotificationType(notification.type),
+      read: Boolean(notification.read_at),
+      timestamp: new Date(notification.created_at),
+      relatedOrderId: notification.related_order_id ?? undefined,
+    }))
+  },
+
+  async create(
+    notification: Pick<AppNotification, "title" | "message" | "type"> & {
+      targetUserId?: string
+      relatedOrderId?: string
+    },
+  ): Promise<AppNotification> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+    if (userError || !user) throw new Error("Bildirim kullanıcısı doğrulanamadı")
+
+    const { data, error } = await supabase
+      .from("notifications")
+      .insert({
+        restaurant_id: restaurantId,
+        user_id: notification.targetUserId ?? user.id,
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        related_order_id: notification.relatedOrderId ?? null,
+      })
+      .select("*")
+      .single()
+    if (error) throw new Error(`Bildirim oluşturulamadı: ${error.message}`)
+
+    return {
+      id: data.id,
+      title: data.title,
+      message: data.message,
+      type: toNotificationType(data.type),
+      read: false,
+      timestamp: new Date(data.created_at),
+      relatedOrderId: data.related_order_id ?? undefined,
+    }
+  },
+
+  async markAsRead(id: string): Promise<void> {
+    const { supabase } = await getRestaurantId()
+    const { error } = await supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("id", id)
+    if (error) throw new Error(`Bildirim güncellenemedi: ${error.message}`)
+  },
+
+  async markAllAsRead(): Promise<void> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) throw new Error("Bildirim kullanıcısı doğrulanamadı")
+    const { error } = await supabase
+      .from("notifications")
+      .update({ read_at: new Date().toISOString() })
+      .eq("restaurant_id", restaurantId)
+      .eq("user_id", user.id)
+      .is("read_at", null)
+    if (error) throw new Error(`Bildirimler güncellenemedi: ${error.message}`)
+  },
+
+  async remove(id: string): Promise<void> {
+    const { supabase } = await getRestaurantId()
+    const { error } = await supabase.from("notifications").delete().eq("id", id)
+    if (error) throw new Error(`Bildirim silinemedi: ${error.message}`)
+  },
+
+  async clear(): Promise<void> {
+    const { supabase, restaurantId } = await getRestaurantId()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) throw new Error("Bildirim kullanıcısı doğrulanamadı")
+    const { error } = await supabase
+      .from("notifications")
+      .delete()
+      .eq("restaurant_id", restaurantId)
+      .eq("user_id", user.id)
+    if (error) throw new Error(`Bildirimler silinemedi: ${error.message}`)
+  },
 }

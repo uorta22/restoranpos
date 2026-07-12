@@ -38,28 +38,6 @@ import {
 } from "lucide-react"
 import type { Courier, Order } from "@/lib/types"
 
-// Sabit demo konumları (İstanbul'da gerçekçi konumlar)
-const DEMO_LOCATIONS = {
-  // Restoran konumu (merkez)
-  restaurant: { lat: 41.0082, lng: 28.9784 }, // Taksim Meydanı
-
-  // Müşteri konumları (yakın çevre)
-  customers: [
-    { lat: 41.0111, lng: 28.9756, address: "Beyoğlu, İstiklal Caddesi No:123" }, // İstiklal Caddesi
-    { lat: 41.0162, lng: 28.9833, address: "Şişhane, Meşrutiyet Caddesi No:45" }, // Şişhane
-    { lat: 41.0046, lng: 28.9877, address: "Karaköy, Kemankeş Caddesi No:67" }, // Karaköy
-    { lat: 41.0036, lng: 28.9732, address: "Cihangir, Sıraselviler Caddesi No:89" }, // Cihangir
-    { lat: 41.0167, lng: 28.9718, address: "Kasımpaşa, Bahriye Caddesi No:34" }, // Kasımpaşa
-  ],
-
-  // Kurye başlangıç konumları (restoran civarı)
-  courierStarts: [
-    { lat: 41.0082, lng: 28.9784 }, // Restoran (Taksim)
-    { lat: 41.0092, lng: 28.9774 }, // Taksim civarı
-    { lat: 41.0072, lng: 28.9794 }, // Taksim civarı
-  ],
-}
-
 export default function DeliveryPage() {
   const { user, isLoading } = useAuth()
   const router = useRouter()
@@ -71,13 +49,11 @@ export default function DeliveryPage() {
     updateCourier,
     removeCourier,
     assignOrderToCourier,
-    updateCourierStatus,
     completeDelivery,
     startLiveTracking,
-    stopLiveTracking,
     isLiveTracking,
   } = useCourierContext()
-  const { orders, getDeliveryOrders, updateDeliveryStatus, getOrderById } = useOrderContext()
+  const { getDeliveryOrders, getOrderById } = useOrderContext()
 
   const [showSidebar, setShowSidebar] = useState(true)
   const [isAddCourierOpen, setIsAddCourierOpen] = useState(false)
@@ -91,13 +67,11 @@ export default function DeliveryPage() {
   const [courierForm, setCourierForm] = useState({
     id: "",
     name: "",
+    email: "",
     phone: "",
     vehicleType: "Motorsiklet" as Courier["vehicleType"],
     vehiclePlate: "",
   })
-
-  // Demo için sabit müşteri konumu (sipariş seçildiğinde değişmeyecek)
-  const [customerLocation, setCustomerLocation] = useState(DEMO_LOCATIONS.customers[0])
 
   const deliveryOrders = getDeliveryOrders()
   const pendingDeliveryOrders = deliveryOrders.filter(
@@ -105,13 +79,16 @@ export default function DeliveryPage() {
       order.status === "Hazır" && (!order.deliveryStatus || order.deliveryStatus === "Beklemede") && !order.courierId,
   )
   const activeDeliveryOrders = deliveryOrders.filter(
-    (order) => order.courierId && (order.deliveryStatus === "Beklemede" || order.deliveryStatus === "Yolda"),
+    (order) =>
+      order.courierId &&
+      (order.deliveryStatus === "Beklemede" || order.deliveryStatus === "Atandı" || order.deliveryStatus === "Yolda"),
   )
   const completedDeliveryOrders = deliveryOrders.filter((order) => order.deliveryStatus === "Teslim Edildi")
+  const trackingOrder = selectedOrder ? getOrderById(selectedOrder) : undefined
+  const isCourier = user?.memberRole === "courier"
+  const canManageCouriers = user?.memberRole === "owner" || user?.memberRole === "manager"
 
   const availableCouriers = getAvailableCouriers()
-  const busyCouriers = couriers.filter((courier) => courier.status !== "Müsait")
-
   // Responsive sidebar kontrolü
   useEffect(() => {
     const handleResize = () => {
@@ -136,31 +113,39 @@ export default function DeliveryPage() {
     return null
   }
 
-  const handleAddCourier = () => {
-    if (!courierForm.name || !courierForm.phone) {
+  const handleAddCourier = async () => {
+    if (!courierForm.name || !courierForm.email || !courierForm.phone) {
       toast({
         title: "Eksik bilgi",
-        description: "Lütfen kurye adı ve telefon numarası girin.",
+        description: "Lütfen kurye adı, e-posta ve telefon numarası girin.",
         variant: "destructive",
       })
       return
     }
 
-    // Rastgele bir başlangıç konumu seç
-    const startLocation = DEMO_LOCATIONS.courierStarts[Math.floor(Math.random() * DEMO_LOCATIONS.courierStarts.length)]
-
-    addCourier({
-      name: courierForm.name,
-      phone: courierForm.phone,
-      status: "Müsait",
-      vehicleType: courierForm.vehicleType,
-      vehiclePlate: courierForm.vehiclePlate,
-      location: startLocation,
-    })
+    try {
+      const invitationToken = await addCourier({
+        name: courierForm.name,
+        email: courierForm.email,
+        phone: courierForm.phone,
+        status: "Müsait",
+        vehicleType: courierForm.vehicleType,
+        vehiclePlate: courierForm.vehiclePlate,
+      })
+      await navigator.clipboard.writeText(`${window.location.origin}/invite/${invitationToken}`)
+    } catch (cause) {
+      toast({
+        title: "Kurye daveti oluşturulamadı",
+        description: cause instanceof Error ? cause.message : "İşlem tamamlanamadı.",
+        variant: "destructive",
+      })
+      return
+    }
 
     setCourierForm({
       id: "",
       name: "",
+      email: "",
       phone: "",
       vehicleType: "Motorsiklet",
       vehiclePlate: "",
@@ -168,8 +153,8 @@ export default function DeliveryPage() {
 
     setIsAddCourierOpen(false)
     toast({
-      title: "Kurye eklendi",
-      description: `${courierForm.name} başarıyla kurye listesine eklendi.`,
+      title: "Kurye daveti oluşturuldu",
+      description: `${courierForm.name} için davet bağlantısı panoya kopyalandı.`,
     })
   }
 
@@ -177,6 +162,7 @@ export default function DeliveryPage() {
     setCourierForm({
       id: courier.id,
       name: courier.name,
+      email: courier.email || "",
       phone: courier.phone,
       vehicleType: courier.vehicleType,
       vehiclePlate: courier.vehiclePlate || "",
@@ -184,7 +170,7 @@ export default function DeliveryPage() {
     setIsEditCourierOpen(true)
   }
 
-  const handleUpdateCourier = () => {
+  const handleUpdateCourier = async () => {
     if (!courierForm.name || !courierForm.phone) {
       toast({
         title: "Eksik bilgi",
@@ -194,7 +180,7 @@ export default function DeliveryPage() {
       return
     }
 
-    updateCourier(courierForm.id, {
+    await updateCourier(courierForm.id, {
       name: courierForm.name,
       phone: courierForm.phone,
       vehicleType: courierForm.vehicleType,
@@ -208,14 +194,14 @@ export default function DeliveryPage() {
     })
   }
 
-  const handleRemoveCourier = (id: string, name: string) => {
+  const handleRemoveCourier = async (id: string, name: string) => {
     try {
-      removeCourier(id)
+      await removeCourier(id)
       toast({
         title: "Kurye silindi",
         description: `${name} başarıyla kurye listesinden silindi.`,
       })
-    } catch (error) {
+    } catch {
       toast({
         title: "Hata",
         description: "Aktif teslimat yapan kurye silinemez.",
@@ -230,7 +216,7 @@ export default function DeliveryPage() {
     setIsAssignOrderOpen(true)
   }
 
-  const handleAssignOrder = () => {
+  const handleAssignOrder = async () => {
     if (!selectedCourier || !selectedOrder) {
       toast({
         title: "Hata",
@@ -240,16 +226,8 @@ export default function DeliveryPage() {
       return
     }
 
-    assignOrderToCourier(selectedCourier.id, selectedOrder)
-    updateDeliveryStatus(selectedOrder, "Yolda")
+    await assignOrderToCourier(selectedCourier.id, selectedOrder)
     setIsAssignOrderOpen(false)
-
-    // Canlı takibi başlat
-    startLiveTracking(selectedCourier.id, selectedOrder)
-
-    // Sipariş için sabit bir müşteri konumu seç
-    const customerIndex = Math.floor(Math.random() * DEMO_LOCATIONS.customers.length)
-    setCustomerLocation(DEMO_LOCATIONS.customers[customerIndex])
 
     toast({
       title: "Sipariş atandı",
@@ -265,30 +243,20 @@ export default function DeliveryPage() {
     }
   }
 
-  const handleViewCourierOrder = (orderId: string) => {
-    const order = getOrderById(orderId)
-    if (order) {
-      setViewOrderDetails(order)
-      setIsViewOrderOpen(true)
-    }
-  }
-
   const handleTrackDelivery = (courier: Courier) => {
     setSelectedCourier(courier)
     if (courier.currentOrderId) {
       setSelectedOrder(courier.currentOrderId)
 
-      // Eğer canlı takip başlatılmamışsa başlat
-      if (!isLiveTracking(courier.id)) {
-        startLiveTracking(courier.id, courier.currentOrderId)
+      if (courier.id === user?.id && !isLiveTracking(courier.id)) {
+        void startLiveTracking(courier.id, courier.currentOrderId)
       }
     }
     setIsTrackingOpen(true)
   }
 
-  const handleCompleteDelivery = (courierId: string, orderId: string) => {
-    completeDelivery(courierId)
-    updateDeliveryStatus(orderId, "Teslim Edildi")
+  const handleCompleteDelivery = async (courierId: string) => {
+    await completeDelivery(courierId)
 
     toast({
       title: "Teslimat tamamlandı",
@@ -330,26 +298,30 @@ export default function DeliveryPage() {
         <Header showMobileMenu={!showSidebar} onMenuToggle={() => setShowSidebar(!showSidebar)} />
         <div className="flex-1 overflow-auto p-4">
           <div className="flex justify-between items-center mb-6">
-            <h1 className="text-2xl font-bold">Paket Servis Yönetimi</h1>
-            <Button onClick={() => setIsAddCourierOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Yeni Kurye Ekle
-            </Button>
+            <h1 className="text-2xl font-bold">{isCourier ? "Teslimatlarım" : "Paket Servis Yönetimi"}</h1>
+            {canManageCouriers && (
+              <Button onClick={() => setIsAddCourierOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" /> Yeni Kurye Ekle
+              </Button>
+            )}
           </div>
 
-          <Tabs defaultValue="dashboard">
+          <Tabs defaultValue={isCourier ? "active-orders" : "dashboard"}>
             <TabsList className="mb-4">
-              <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-              <TabsTrigger value="couriers">Kuryeler</TabsTrigger>
-              <TabsTrigger value="pending-orders">Bekleyen Siparişler</TabsTrigger>
+              {!isCourier && <TabsTrigger value="dashboard">Dashboard</TabsTrigger>}
+              {!isCourier && <TabsTrigger value="couriers">Kuryeler</TabsTrigger>}
+              {!isCourier && <TabsTrigger value="pending-orders">Bekleyen Siparişler</TabsTrigger>}
               <TabsTrigger value="active-orders">Aktif Teslimatlar</TabsTrigger>
               <TabsTrigger value="completed-orders">Tamamlanan Teslimatlar</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="dashboard">
-              <CourierDashboard />
-            </TabsContent>
+            {!isCourier && (
+              <TabsContent value="dashboard">
+                <CourierDashboard />
+              </TabsContent>
+            )}
 
-            <TabsContent value="couriers">
+            {!isCourier && <TabsContent value="couriers">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {couriers.map((courier) => (
                   <Card key={courier.id}>
@@ -412,7 +384,7 @@ export default function DeliveryPage() {
                           {courier.currentOrderId && (
                             <Button
                               variant="outline"
-                              onClick={() => handleCompleteDelivery(courier.id, courier.currentOrderId!)}
+                              onClick={() => handleCompleteDelivery(courier.id)}
                             >
                               <CheckCircle className="mr-2 h-4 w-4" />
                               Teslim Edildi
@@ -420,24 +392,28 @@ export default function DeliveryPage() {
                           )}
                         </>
                       )}
-                      <Button variant="outline" onClick={() => handleEditCourier(courier)}>
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="text-red-500"
-                        onClick={() => handleRemoveCourier(courier.id, courier.name)}
-                        disabled={courier.status !== "Müsait"}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {canManageCouriers && (
+                        <>
+                          <Button variant="outline" onClick={() => handleEditCourier(courier)}>
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            className="text-red-500"
+                            onClick={() => handleRemoveCourier(courier.id, courier.name)}
+                            disabled={courier.status !== "Müsait"}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
                     </CardFooter>
                   </Card>
                 ))}
               </div>
-            </TabsContent>
+            </TabsContent>}
 
-            <TabsContent value="pending-orders">
+            {!isCourier && <TabsContent value="pending-orders">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {pendingDeliveryOrders.length === 0 ? (
                   <div className="col-span-full text-center py-12">
@@ -499,7 +475,7 @@ export default function DeliveryPage() {
                   ))
                 )}
               </div>
-            </TabsContent>
+            </TabsContent>}
 
             <TabsContent value="active-orders">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -562,7 +538,7 @@ export default function DeliveryPage() {
                             </Button>
                           )}
                           {courier && (
-                            <Button variant="outline" onClick={() => handleCompleteDelivery(courier.id, order.id)}>
+                            <Button variant="outline" onClick={() => handleCompleteDelivery(courier.id)}>
                               <CheckCircle className="mr-2 h-4 w-4" />
                               Teslim Edildi
                             </Button>
@@ -646,6 +622,16 @@ export default function DeliveryPage() {
               />
             </div>
             <div className="space-y-2">
+              <Label htmlFor="courier-email">E-posta</Label>
+              <Input
+                id="courier-email"
+                type="email"
+                value={courierForm.email}
+                onChange={(e) => setCourierForm({ ...courierForm, email: e.target.value })}
+                placeholder="kurye@ornek.com"
+              />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="phone">Telefon</Label>
               <Input
                 id="phone"
@@ -686,7 +672,7 @@ export default function DeliveryPage() {
             <Button variant="outline" onClick={() => setIsAddCourierOpen(false)}>
               İptal
             </Button>
-            <Button onClick={handleAddCourier}>Kurye Ekle</Button>
+            <Button onClick={handleAddCourier}>Davet Oluştur</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -706,6 +692,10 @@ export default function DeliveryPage() {
                 onChange={(e) => setCourierForm({ ...courierForm, name: e.target.value })}
                 placeholder="Kurye adını girin"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-email">E-posta</Label>
+              <Input id="edit-email" type="email" value={courierForm.email} readOnly disabled />
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-phone">Telefon</Label>
@@ -835,13 +825,15 @@ export default function DeliveryPage() {
             <DialogTitle>Teslimat Takibi</DialogTitle>
           </DialogHeader>
           <div className="h-[500px] overflow-auto">
-            {selectedCourier && selectedOrder && (
+            {selectedCourier?.location && selectedOrder && trackingOrder?.deliveryAddress?.location ? (
               <RealTimeTrackingMap
-                orderId={selectedOrder}
-                courierLocation={selectedCourier.location || DEMO_LOCATIONS.restaurant}
+                courierLocation={selectedCourier.location}
                 customerLocation={{
-                  ...customerLocation,
-                  address: customerLocation.address || "Teslimat Adresi",
+                  ...trackingOrder.deliveryAddress.location,
+                  address:
+                    trackingOrder.deliveryAddress.address ||
+                    trackingOrder.deliveryAddress.fullAddress ||
+                    "Teslimat adresi",
                 }}
                 courierInfo={{
                   name: selectedCourier.name,
@@ -849,8 +841,12 @@ export default function DeliveryPage() {
                   vehicleType: selectedCourier.vehicleType,
                   vehiclePlate: selectedCourier.vehiclePlate,
                 }}
-                orderStatus={getOrderById(selectedOrder)?.deliveryStatus || "delivering"}
+                orderStatus={trackingOrder.deliveryStatus || "Beklemede"}
               />
+            ) : (
+              <div className="grid h-full place-items-center px-6 text-center text-sm text-gray-600">
+                Haritayı göstermek için kurye ve müşteri konumlarının paylaşılmış olması gerekir.
+              </div>
             )}
           </div>
           <DialogFooter>

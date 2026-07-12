@@ -4,16 +4,19 @@ export interface FoodItem {
   description?: string
   price: number
   image?: string
-  category: string // This will store the category NAME
+  category: string
+  category_id?: string
   available: boolean
   type: "Et" | "Vejeteryan"
   discount?: number
   stock?: number
-  // restaurant_id?: string; // Consider adding this if not already present and needed
+  restaurant_id?: string
+  costPrice?: number
+  trackInventory?: boolean
 }
 
 export interface CartItem {
-  id: string // Or remove if cart items are not stored with IDs themselves
+  id: string
   foodItem: FoodItem
   quantity: number
   notes?: string
@@ -31,74 +34,84 @@ export interface Table {
     y: number
   }
   currentOrderId?: string
-  // restaurant_id?: string;
-}
-
-export interface Order {
-  id: string
-  items: CartItem[]
-  total: number
-  status: "Beklemede" | "Hazırlanıyor" | "Hazır" | "Tamamlandı" | "İptal Edildi"
-  createdAt: Date
-  updatedAt: Date
-  tableId?: string
-  tableName?: string
-  customerName?: string
-  paymentStatus: "Beklemede" | "Ödendi"
-  paymentMethod?: "Nakit" | "Kredi Kartı" | "Online"
-  notes?: string
-  isDelivery?: boolean
-  deliveryStatus?: "Beklemede" | "Yolda" | "Teslim Edildi"
-  deliveryAddress?: DeliveryAddress
-  courierId?: string
-  estimatedDeliveryTime?: Date
-  // restaurant_id?: string;
-}
-
-export interface User {
-  id: string
-  name: string // Consider mapping to full_name from Supabase
-  email: string
-  role: "Yönetici" | "Garson" | "Şef" | "Kasiyer" | "Kurye" // Align with public.users.role
-  avatar?: string
-  // restaurant_id?: string;
-}
-
-export interface Courier {
-  id: string
-  name: string
-  phone: string
-  status: "Müsait" | "Siparişte" | "Teslimatta"
-  avatar?: string
-  vehicleType: "Motorsiklet" | "Araba" | "Bisiklet"
-  vehiclePlate?: string
-  activeFrom: Date // Ensure this is a Date object or string as appropriate
-  totalDeliveries: number
-  currentOrderId?: string
-  location?: {
-    lat: number
-    lng: number
-  }
-  // restaurant_id?: string;
-}
-
-export interface DeliveryAddress {
-  fullAddress: string
-  district: string
-  city: string
-  contactName: string
-  contactPhone: string
-  instructions?: string
-  location?: {
-    lat: number
-    lng: number
-  }
+  restaurant_id?: string
 }
 
 export enum OrderType {
   DINE_IN = "Restoranda",
   TAKEAWAY = "Gel-Al",
   DELIVERY = "Paket Servis",
+}
+
+export interface Order {
+  id: string
+  items: CartItem[]
+  total: number
+  subtotal?: number
+  tax?: number
+  discount?: number
+  deliveryFee?: number
+  type?: OrderType
+  status: "Beklemede" | "Hazırlanıyor" | "Hazır" | "Tamamlandı" | "İptal Edildi"
+  createdAt: Date
+  updatedAt: Date
+  tableId?: string
+  tableName?: string
+  customerName?: string
+  customerPhone?: string
+  paymentStatus: "Beklemede" | "Kısmi Ödendi" | "Ödendi" | "İade Edildi" | "Başarısız"
+  paymentMethod?: string
+  notes?: string
+  isDelivery?: boolean
+  deliveryStatus?: "Beklemede" | "Atandı" | "Yolda" | "Teslim Edildi" | "İptal Edildi"
+  deliveryAddress?: DeliveryAddress
+  deliveryTrackingToken?: string
+  courierId?: string
+  estimatedDeliveryTime?: Date
+  restaurant_id?: string
+}
+
+export interface User {
+  id: string
+  name: string
+  email: string
+  role: "Yönetici" | "Garson" | "Şef" | "Kasiyer" | "Kurye"
+  avatar?: string
+  restaurant_id?: string
+}
+
+export interface Courier {
+  id: string
+  name: string
+  email?: string
+  phone: string
+  status: "Müsait" | "Siparişte" | "Teslimatta"
+  avatar?: string
+  vehicleType: "Motorsiklet" | "Araba" | "Bisiklet"
+  vehiclePlate?: string
+  activeFrom: Date
+  totalDeliveries: number
+  currentOrderId?: string
+  location?: {
+    lat: number
+    lng: number
+  }
+}
+
+export interface DeliveryAddress {
+  fullAddress?: string
+  address?: string
+  district?: string
+  city?: string
+  contactName?: string
+  customerName?: string
+  contactPhone?: string
+  phone?: string
+  instructions?: string
+  location?: {
+    lat: number
+    lng: number
+  }
 }
 
 export interface Notification {
@@ -114,10 +127,50 @@ export interface Notification {
   action?: string
 }
 
-// Added simple Category type
 export interface Category {
   id: string
   name: string
-  // restaurant_id?: string; // Consider if categories are restaurant-specific
-  // Add other fields like 'icon' if necessary
+  description?: string
+  icon?: string
+  sortOrder?: number
+  active?: boolean
+  restaurant_id?: string
+}
+
+export interface Reservation {
+  id: string
+  customerName: string
+  date: Date
+  people: number
+  tableId?: string
+  tableNumber?: string
+  phone: string
+  email?: string
+  notes?: string
+  status: "Onaylandı" | "Beklemede" | "Tamamlandı" | "İptal Edildi" | "Gelmedi"
+}
+
+export interface InventoryItem {
+  id: string
+  productId: string
+  productName?: string
+  currentStock: number
+  minStock: number
+  maxStock?: number
+  unit: string
+  costPrice?: number
+  supplierId?: string
+  lastUpdated: string
+}
+
+export interface Supplier {
+  id: string
+  name: string
+  contact_name?: string
+  phone?: string
+  email?: string
+  address?: string
+  restaurant_id: string
+  created_at?: string
+  updated_at?: string
 }

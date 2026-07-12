@@ -14,8 +14,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/context/auth-context"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
-import { User, Mail, Shield, Camera, Key, Save, BellRing, Moon, SunMedium } from "lucide-react"
-import { Switch } from "@/components/ui/switch"
+import { ImageIcon, Key, Mail, Save, Shield, User } from "lucide-react"
+import { getClientSupabaseInstance } from "@/lib/supabase"
+import { validatePassword } from "@/lib/utils"
 
 export default function ProfilePage() {
   const { user, isLoading, updateProfile } = useAuth()
@@ -32,12 +33,6 @@ export default function ProfilePage() {
     newPassword: "",
     confirmPassword: "",
   })
-  const [notificationSettings, setNotificationSettings] = useState({
-    orders: true,
-    system: true,
-    marketing: false,
-  })
-  const [isDarkMode, setIsDarkMode] = useState(false)
 
   // Responsive sidebar kontrolü
   useEffect(() => {
@@ -52,13 +47,12 @@ export default function ProfilePage() {
 
   // User bilgilerini profil formuna doldur
   useEffect(() => {
-    if (user) {
-      setProfileData({
-        name: user.name,
-        email: user.email,
-        avatar: user.avatar || "",
-      })
-    }
+    if (!user) return
+    const timeoutId = window.setTimeout(
+      () => setProfileData({ name: user.name, email: user.email, avatar: user.avatar || "" }),
+      0,
+    )
+    return () => window.clearTimeout(timeoutId)
   }, [user])
 
   if (isLoading) {
@@ -82,7 +76,9 @@ export default function ProfilePage() {
       if (result.success) {
         toast({
           title: "Profil güncellendi",
-          description: "Profil bilgileriniz başarıyla güncellendi.",
+          description: result.requiresEmailConfirmation
+            ? "Yeni e-posta adresinize gönderilen doğrulama bağlantısını açın."
+            : "Profil bilgileriniz başarıyla güncellendi.",
         })
       } else {
         toast({
@@ -91,7 +87,7 @@ export default function ProfilePage() {
           variant: "destructive",
         })
       }
-    } catch (error) {
+    } catch {
       toast({
         title: "Hata",
         description: "Profil güncellenirken bir hata oluştu.",
@@ -112,6 +108,31 @@ export default function ProfilePage() {
       return
     }
 
+    if (!validatePassword(passwordData.newPassword)) {
+      toast({
+        title: "Geçersiz parola",
+        description: "Parola en az 8 karakter, büyük harf, küçük harf ve rakam içermelidir.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const supabase = getClientSupabaseInstance()
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: passwordData.currentPassword,
+    })
+    if (signInError) {
+      toast({ title: "Mevcut parola hatalı", description: "Parolanız değiştirilemedi.", variant: "destructive" })
+      return
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({ password: passwordData.newPassword })
+    if (updateError) {
+      toast({ title: "Parola güncellenemedi", description: updateError.message, variant: "destructive" })
+      return
+    }
+
     toast({
       title: "Şifre güncellendi",
       description: "Şifreniz başarıyla güncellendi.",
@@ -121,27 +142,6 @@ export default function ProfilePage() {
       currentPassword: "",
       newPassword: "",
       confirmPassword: "",
-    })
-  }
-
-  const handleNotificationUpdate = (key: keyof typeof notificationSettings, value: boolean) => {
-    setNotificationSettings((prev) => ({
-      ...prev,
-      [key]: value,
-    }))
-
-    toast({
-      title: "Bildirim ayarları güncellendi",
-      description: "Bildirim ayarlarınız kaydedildi.",
-    })
-  }
-
-  const toggleDarkMode = () => {
-    setIsDarkMode(!isDarkMode)
-    // In a real app, you would also update the theme in your theme provider
-    toast({
-      title: isDarkMode ? "Açık Tema" : "Koyu Tema",
-      description: `Tema ${isDarkMode ? "açık" : "koyu"} olarak değiştirildi.`,
     })
   }
 
@@ -162,9 +162,6 @@ export default function ProfilePage() {
                       <AvatarImage src={user.avatar} />
                       <AvatarFallback className="text-2xl">{user.name.charAt(0)}</AvatarFallback>
                     </Avatar>
-                    <Button size="icon" className="absolute bottom-0 right-0 h-8 w-8 rounded-full" variant="secondary">
-                      <Camera className="h-4 w-4" />
-                    </Button>
                   </div>
                   <h2 className="text-xl font-semibold">{user.name}</h2>
                   <p className="text-sm text-gray-500">{user.email}</p>
@@ -178,7 +175,6 @@ export default function ProfilePage() {
                 <TabsList className="w-full justify-start mb-6">
                   <TabsTrigger value="general">Genel</TabsTrigger>
                   <TabsTrigger value="security">Güvenlik</TabsTrigger>
-                  <TabsTrigger value="notifications">Bildirimler</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="general">
@@ -197,6 +193,8 @@ export default function ProfilePage() {
                             id="name"
                             value={profileData.name}
                             onChange={(e) => setProfileData({ ...profileData, name: e.target.value })}
+                            autoComplete="name"
+                            required
                           />
                         </div>
 
@@ -210,6 +208,22 @@ export default function ProfilePage() {
                             type="email"
                             value={profileData.email}
                             onChange={(e) => setProfileData({ ...profileData, email: e.target.value })}
+                            autoComplete="email"
+                            required
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="avatar" className="flex items-center gap-2">
+                            <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                            Profil görseli URL
+                          </Label>
+                          <Input
+                            id="avatar"
+                            type="url"
+                            value={profileData.avatar}
+                            onChange={(event) => setProfileData({ ...profileData, avatar: event.target.value })}
+                            placeholder="https://..."
                           />
                         </div>
 
@@ -224,24 +238,6 @@ export default function ProfilePage() {
                           </p>
                         </div>
 
-                        <div className="flex items-center justify-between pt-4">
-                          <div className="flex items-center space-x-2">
-                            <Switch id="dark-mode" checked={isDarkMode} onCheckedChange={toggleDarkMode} />
-                            <Label htmlFor="dark-mode" className="flex items-center gap-2">
-                              {isDarkMode ? (
-                                <>
-                                  <Moon className="h-4 w-4" />
-                                  Koyu Tema
-                                </>
-                              ) : (
-                                <>
-                                  <SunMedium className="h-4 w-4" />
-                                  Açık Tema
-                                </>
-                              )}
-                            </Label>
-                          </div>
-                        </div>
                       </CardContent>
                       <CardFooter>
                         <Button type="submit">
@@ -270,6 +266,8 @@ export default function ProfilePage() {
                             type="password"
                             value={passwordData.currentPassword}
                             onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
+                            autoComplete="current-password"
+                            required
                           />
                         </div>
 
@@ -283,6 +281,9 @@ export default function ProfilePage() {
                             type="password"
                             value={passwordData.newPassword}
                             onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+                            autoComplete="new-password"
+                            minLength={8}
+                            required
                           />
                         </div>
 
@@ -296,6 +297,9 @@ export default function ProfilePage() {
                             type="password"
                             value={passwordData.confirmPassword}
                             onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+                            autoComplete="new-password"
+                            minLength={8}
+                            required
                           />
                         </div>
                       </CardContent>
@@ -309,65 +313,6 @@ export default function ProfilePage() {
                   </Card>
                 </TabsContent>
 
-                <TabsContent value="notifications">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Bildirim Ayarları</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <Label htmlFor="notify-orders" className="flex items-center gap-2 text-base">
-                            <BellRing className="h-4 w-4" />
-                            Sipariş Bildirimleri
-                          </Label>
-                          <p className="text-sm text-gray-500">
-                            Yeni siparişler ve sipariş durumu güncellemeleri hakkında bildirim alın.
-                          </p>
-                        </div>
-                        <Switch
-                          id="notify-orders"
-                          checked={notificationSettings.orders}
-                          onCheckedChange={(checked) => handleNotificationUpdate("orders", checked)}
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <Label htmlFor="notify-system" className="flex items-center gap-2 text-base">
-                            <BellRing className="h-4 w-4" />
-                            Sistem Bildirimleri
-                          </Label>
-                          <p className="text-sm text-gray-500">
-                            Sistem güncellemeleri ve önemli duyurular hakkında bildirim alın.
-                          </p>
-                        </div>
-                        <Switch
-                          id="notify-system"
-                          checked={notificationSettings.system}
-                          onCheckedChange={(checked) => handleNotificationUpdate("system", checked)}
-                        />
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                          <Label htmlFor="notify-marketing" className="flex items-center gap-2 text-base">
-                            <BellRing className="h-4 w-4" />
-                            Pazarlama Bildirimleri
-                          </Label>
-                          <p className="text-sm text-gray-500">
-                            Kampanyalar, indirimler ve özel teklifler hakkında bildirim alın.
-                          </p>
-                        </div>
-                        <Switch
-                          id="notify-marketing"
-                          checked={notificationSettings.marketing}
-                          onCheckedChange={(checked) => handleNotificationUpdate("marketing", checked)}
-                        />
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
               </Tabs>
             </div>
           </div>

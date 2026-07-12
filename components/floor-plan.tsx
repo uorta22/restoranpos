@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useCallback, useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -16,16 +16,15 @@ import { Label } from "@/components/ui/label"
 import { useCart } from "@/context/cart-context"
 
 export function FloorPlan() {
-  const { tables, updateTableStatus, clearTable, getTablesBySection, assignOrderToTable } = useTableContext()
+  const { updateTableStatus, clearTable, getTablesBySection } = useTableContext()
   const { setTableInfo } = useCart()
-  const { orders, getOrderById, updatePaymentStatus } = useOrderContext()
+  const { getOrderById, updatePaymentStatus } = useOrderContext()
   const { toast } = useToast()
 
   const [selectedTable, setSelectedTable] = useState<Table | null>(null)
   const [isTableDialogOpen, setIsTableDialogOpen] = useState(false)
   const [isStatusDialogOpen, setIsStatusDialogOpen] = useState(false)
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false)
-  const [currentOrder, setCurrentOrder] = useState<Order | null>(null)
   const [customerName, setCustomerName] = useState("")
   const [newStatus, setNewStatus] = useState<"Müsait" | "Dolu" | "Rezerve">("Dolu")
   const [activeTab, setActiveTab] = useState("ana-salon")
@@ -34,33 +33,17 @@ export function FloorPlan() {
   const bahceTables = getTablesBySection("Bahçe")
   const terasTables = getTablesBySection("Teras")
 
-  // Load the active order for the selected table
-  useEffect(() => {
-    if (selectedTable && selectedTable.currentOrderId) {
-      const order = getOrderById(selectedTable.currentOrderId)
-      setCurrentOrder(order || null)
-    } else {
-      setCurrentOrder(null)
-    }
-  }, [selectedTable, getOrderById])
+  const currentOrder = selectedTable?.currentOrderId ? getOrderById(selectedTable.currentOrderId) ?? null : null
 
   const handleTableClick = useCallback(
     (table: Table) => {
       setSelectedTable(table)
       setIsTableDialogOpen(true)
 
-      // Find active order for the table
-      if (table.currentOrderId) {
-        const order = getOrderById(table.currentOrderId)
-        setCurrentOrder(order || null)
-      } else {
-        setCurrentOrder(null)
-      }
-
       // Set customer name
       setCustomerName(table.customer || "")
     },
-    [getOrderById],
+    [],
   )
 
   const handleOpenStatusDialog = useCallback(() => {
@@ -71,17 +54,24 @@ export function FloorPlan() {
     setIsStatusDialogOpen(true)
   }, [selectedTable])
 
-  const handleStatusChange = useCallback(() => {
+  const handleStatusChange = useCallback(async () => {
     if (!selectedTable) return
 
-    updateTableStatus(selectedTable.id, newStatus, customerName || undefined)
-    setIsStatusDialogOpen(false)
-    setIsTableDialogOpen(false)
-
-    toast({
-      title: `Masa ${selectedTable.number} güncellendi`,
-      description: `Masa durumu ${newStatus} olarak değiştirildi.`,
-    })
+    try {
+      await updateTableStatus(selectedTable.id, newStatus, customerName || undefined)
+      setIsStatusDialogOpen(false)
+      setIsTableDialogOpen(false)
+      toast({
+        title: `Masa ${selectedTable.number} güncellendi`,
+        description: `Masa durumu ${newStatus} olarak değiştirildi.`,
+      })
+    } catch (cause) {
+      toast({
+        title: "Masa güncellenemedi",
+        description: cause instanceof Error ? cause.message : "İşlem tamamlanamadı.",
+        variant: "destructive",
+      })
+    }
   }, [selectedTable, newStatus, customerName, updateTableStatus, toast])
 
   const handleSetupOrder = useCallback(() => {
@@ -96,16 +86,23 @@ export function FloorPlan() {
     })
   }, [selectedTable, setTableInfo, toast])
 
-  const handleClearTable = useCallback(() => {
+  const handleClearTable = useCallback(async () => {
     if (!selectedTable) return
 
-    clearTable(selectedTable.id)
-    setIsTableDialogOpen(false)
-
-    toast({
-      title: "Masa temizlendi",
-      description: `${selectedTable.number} numaralı masa temizlendi ve müsait duruma getirildi.`,
-    })
+    try {
+      await clearTable(selectedTable.id)
+      setIsTableDialogOpen(false)
+      toast({
+        title: "Masa temizlendi",
+        description: `${selectedTable.number} numaralı masa temizlendi ve müsait duruma getirildi.`,
+      })
+    } catch (cause) {
+      toast({
+        title: "Masa temizlenemedi",
+        description: cause instanceof Error ? cause.message : "İşlem tamamlanamadı.",
+        variant: "destructive",
+      })
+    }
   }, [selectedTable, clearTable, toast])
 
   const handlePaymentClick = useCallback(() => {
@@ -115,16 +112,17 @@ export function FloorPlan() {
   }, [currentOrder])
 
   const handleCompletePayment = useCallback(
-    (method: "Nakit" | "Kredi Kartı") => {
+    async (method: "Nakit" | "Kredi Kartı") => {
       if (!currentOrder) return
 
-      updatePaymentStatus(currentOrder.id, "Ödendi", method)
-      setIsPaymentDialogOpen(false)
-
-      toast({
-        title: "Ödeme tamamlandı",
-        description: `${method} ile ödeme işlemi tamamlandı.`,
-      })
+      const completed = await updatePaymentStatus(currentOrder.id, "Ödendi", method)
+      if (completed) {
+        setIsPaymentDialogOpen(false)
+        toast({
+          title: "Ödeme tamamlandı",
+          description: `${method} ile ödeme işlemi tamamlandı.`,
+        })
+      }
     },
     [currentOrder, updatePaymentStatus, toast],
   )
@@ -158,7 +156,7 @@ export function FloorPlan() {
   const renderTable = useCallback(
     (table: Table) => {
       const order = table.currentOrderId ? getOrderById(table.currentOrderId) : null
-      const isDelayed = isOrderDelayed(order)
+      const isDelayed = isOrderDelayed(order ?? null)
 
       // Table shape and size classes
       const tableShape = table.capacity <= 2 ? "rounded-full" : "rounded-lg"

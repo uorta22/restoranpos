@@ -3,6 +3,8 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/context/auth-context"
+import type { MemberRole } from "@/lib/database.types"
 import {
   Home,
   ShoppingCart,
@@ -17,22 +19,33 @@ import {
   TableProperties,
 } from "lucide-react"
 
-const navigation = [
-  { name: "Ana Sayfa", href: "/", icon: Home },
-  { name: "Menü", href: "/menu", icon: UtensilsCrossed },
-  { name: "Siparişler", href: "/orders", icon: ShoppingCart },
-  { name: "Mutfak", href: "/kitchen", icon: ChefHat },
-  { name: "Masalar", href: "/tables", icon: TableProperties },
-  { name: "Rezervasyonlar", href: "/reservations", icon: Calendar },
-  { name: "Teslimat", href: "/delivery", icon: MapPin },
-  { name: "Kullanıcılar", href: "/users", icon: Users },
-  { name: "Depo", href: "/store", icon: Store },
-  { name: "Raporlar", href: "/reports", icon: BarChart3 },
-  { name: "Ayarlar", href: "/settings", icon: Settings },
+const management: MemberRole[] = ["owner", "manager"]
+const frontOfHouse: MemberRole[] = ["owner", "manager", "cashier", "waiter"]
+const navigation: Array<{
+  name: string
+  href: string
+  icon: typeof Home
+  roles: MemberRole[]
+}> = [
+  { name: "Ana Sayfa", href: "/", icon: Home, roles: frontOfHouse },
+  { name: "Menü", href: "/menu", icon: UtensilsCrossed, roles: [...frontOfHouse, "kitchen"] },
+  { name: "Siparişler", href: "/orders", icon: ShoppingCart, roles: [...frontOfHouse, "kitchen"] },
+  { name: "Mutfak", href: "/kitchen", icon: ChefHat, roles: [...management, "kitchen"] },
+  { name: "Masalar", href: "/tables", icon: TableProperties, roles: frontOfHouse },
+  { name: "Rezervasyonlar", href: "/reservations", icon: Calendar, roles: frontOfHouse },
+  { name: "Teslimat", href: "/delivery", icon: MapPin, roles: [...management, "cashier", "courier"] },
+  { name: "Kullanıcılar", href: "/users", icon: Users, roles: management },
+  { name: "Depo", href: "/store", icon: Store, roles: management },
+  { name: "Raporlar", href: "/reports", icon: BarChart3, roles: [...management, "cashier"] },
+  { name: "Ayarlar", href: "/settings", icon: Settings, roles: management },
 ]
 
 export function SidebarNav() {
   const pathname = usePathname()
+  const { user } = useAuth()
+  const visibleNavigation = user?.memberRole
+    ? navigation.filter((item) => item.roles.includes(user.memberRole!))
+    : []
 
   return (
     <div className="w-64 bg-white shadow-lg flex flex-col">
@@ -41,7 +54,7 @@ export function SidebarNav() {
       </div>
       <nav className="flex-1 p-4">
         <ul className="space-y-2">
-          {navigation.map((item) => {
+          {visibleNavigation.map((item) => {
             const isActive = pathname === item.href
             return (
               <li key={item.name}>

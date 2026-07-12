@@ -12,17 +12,9 @@ import { Plus, Edit, Trash2, Calendar, Clock, Users } from "lucide-react"
 import { ReservationForm } from "@/components/reservation-form"
 import { EmptyState } from "@/components/empty-state"
 import { reservationsApi } from "@/lib/api"
+import type { Reservation } from "@/lib/types"
 
-interface Reservation {
-  id: string
-  customerName: string
-  date: Date
-  people: number
-  tableNumber?: string
-  phone: string
-  notes?: string
-  status: "Onaylandı" | "Beklemede" | "İptal"
-}
+type ReservationFormValue = Reservation & { time: string; tableNumber: string; notes: string }
 
 export default function ReservationsPage() {
   const { user, isLoading } = useAuth()
@@ -32,7 +24,7 @@ export default function ReservationsPage() {
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [loading, setLoading] = useState(true)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
-  const [currentReservation, setCurrentReservation] = useState({
+  const [currentReservation, setCurrentReservation] = useState<ReservationFormValue>({
     id: "",
     customerName: "",
     date: new Date(),
@@ -112,6 +104,8 @@ export default function ReservationsPage() {
     if (reservation) {
       setCurrentReservation({
         ...reservation,
+        tableNumber: reservation.tableNumber ?? "",
+        notes: reservation.notes ?? "",
         time: new Intl.DateTimeFormat("tr-TR", {
           hour: "2-digit",
           minute: "2-digit",
@@ -133,7 +127,7 @@ export default function ReservationsPage() {
       } else {
         throw new Error("Silme işlemi başarısız")
       }
-    } catch (error) {
+    } catch {
       toast({
         title: "Hata",
         description: "Rezervasyon silinirken bir hata oluştu.",
@@ -142,7 +136,7 @@ export default function ReservationsPage() {
     }
   }
 
-  const handleSaveReservation = async (reservationData: any) => {
+  const handleSaveReservation = async (reservationData: ReservationFormValue) => {
     // Form validation
     if (!reservationData.customerName || !reservationData.phone) {
       toast({
@@ -181,7 +175,7 @@ export default function ReservationsPage() {
       }
 
       setIsDialogOpen(false)
-    } catch (error) {
+    } catch {
       toast({
         title: "Hata",
         description: "Rezervasyon kaydedilirken bir hata oluştu.",
@@ -293,12 +287,14 @@ export default function ReservationsPage() {
         </div>
       </div>
 
-      <ReservationForm
-        open={isDialogOpen}
-        onOpenChange={setIsDialogOpen}
-        initialData={currentReservation}
-        onSave={handleSaveReservation}
-      />
+      {isDialogOpen && (
+        <ReservationForm
+          open={isDialogOpen}
+          onOpenChange={setIsDialogOpen}
+          initialData={currentReservation}
+          onSave={handleSaveReservation}
+        />
+      )}
     </div>
   )
 }

@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast"
 import { ReceiptPrinter } from "@/components/receipt-printer"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import type { Order } from "@/lib/types"
 
 export default function OrdersPage() {
   const { user, isLoading } = useAuth()
@@ -26,9 +27,13 @@ export default function OrdersPage() {
   const [showSidebar, setShowSidebar] = useState(true)
   const [orderFilter, setOrderFilter] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [currentOrder, setCurrentOrder] = useState<any>(null)
+  const [currentOrder, setCurrentOrder] = useState<Order | null>(null)
   const [isReceiptDialogOpen, setIsReceiptDialogOpen] = useState(false)
   const [isViewOrderDialogOpen, setIsViewOrderDialogOpen] = useState(false)
+  const canRunKitchenSteps = user?.memberRole !== "waiter"
+  const canCompleteOrder = user?.memberRole !== "kitchen"
+  const canCancelOrder = user?.memberRole !== "kitchen"
+  const canTakePayment = user?.memberRole === "owner" || user?.memberRole === "manager" || user?.memberRole === "cashier"
 
   // Responsive sidebar kontrolü
   useEffect(() => {
@@ -69,7 +74,7 @@ export default function OrdersPage() {
       if (isViewOrderDialogOpen) {
         setIsViewOrderDialogOpen(false)
       }
-    } catch (error) {
+    } catch {
       toast({
         title: "Hata",
         description: "Sipariş durumu güncellenirken bir hata oluştu.",
@@ -89,7 +94,7 @@ export default function OrdersPage() {
         title: "Ödeme durumu güncellendi",
         description: `Ödeme durumu "${status}" olarak güncellendi.`,
       })
-    } catch (error) {
+    } catch {
       toast({
         title: "Hata",
         description: "Ödeme durumu güncellenirken bir hata oluştu.",
@@ -98,12 +103,12 @@ export default function OrdersPage() {
     }
   }
 
-  const handlePrintReceipt = (order: any) => {
+  const handlePrintReceipt = (order: Order) => {
     setCurrentOrder(order)
     setIsReceiptDialogOpen(true)
   }
 
-  const handleViewOrderDetails = (order: any) => {
+  const handleViewOrderDetails = (order: Order) => {
     setCurrentOrder(order)
     setIsViewOrderDialogOpen(true)
   }
@@ -622,7 +627,7 @@ export default function OrdersPage() {
               <div>
                 <p className="font-medium">Sipariş Öğeleri</p>
                 <div className="mt-2 space-y-2">
-                  {currentOrder.items.map((item: any) => (
+                  {currentOrder.items.map((item) => (
                     <div key={item.id} className="flex justify-between">
                       <span>
                         {item.quantity}x {item.foodItem.title}
@@ -641,47 +646,68 @@ export default function OrdersPage() {
           <DialogFooter className="flex flex-wrap gap-2">
             {currentOrder && currentOrder.status !== "Tamamlandı" && currentOrder.status !== "İptal Edildi" && (
               <>
-                {currentOrder.status === "Beklemede" && (
+                {canRunKitchenSteps && currentOrder.status === "Beklemede" && (
                   <Button size="sm" onClick={() => handleStatusChange(currentOrder.id, "Hazırlanıyor")}>
                     Hazırlanıyor
                   </Button>
                 )}
-                {currentOrder.status === "Hazırlanıyor" && (
+                {canRunKitchenSteps && currentOrder.status === "Hazırlanıyor" && (
                   <Button size="sm" onClick={() => handleStatusChange(currentOrder.id, "Hazır")}>
                     Hazır
                   </Button>
                 )}
-                {currentOrder.status === "Hazır" && (
+                {canCompleteOrder && currentOrder.status === "Hazır" && (
                   <Button size="sm" onClick={() => handleStatusChange(currentOrder.id, "Tamamlandı")}>
                     Tamamlandı
                   </Button>
                 )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-red-500"
-                  onClick={() => handleStatusChange(currentOrder.id, "İptal Edildi")}
-                >
-                  İptal Et
-                </Button>
+                {canCancelOrder && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-red-500"
+                    onClick={() => handleStatusChange(currentOrder.id, "İptal Edildi")}
+                  >
+                    İptal Et
+                  </Button>
+                )}
               </>
             )}
-            {currentOrder && currentOrder.paymentStatus === "Beklemede" && currentOrder.status !== "İptal Edildi" && (
-              <Button size="sm" onClick={() => handlePaymentStatusChange(currentOrder.id, "Ödendi", "Nakit")}>
+            {canTakePayment && currentOrder && currentOrder.paymentStatus === "Beklemede" && currentOrder.status !== "İptal Edildi" && (
+              <Button
+                size="sm"
+                onClick={() =>
+                  handlePaymentStatusChange(
+                    currentOrder.id,
+                    "Ödendi",
+                    currentOrder.paymentMethod === "Kredi Kartı"
+                      ? "Kredi Kartı"
+                      : currentOrder.paymentMethod === "Online"
+                        ? "Online"
+                        : "Nakit",
+                  )
+                }
+              >
                 <CreditCard className="mr-1 h-4 w-4" />
                 Ödendi İşaretle
               </Button>
             )}
-            <Button size="sm" onClick={() => handlePrintReceipt(currentOrder)}>
-              <Printer className="mr-1 h-4 w-4" />
-              Fiş Yazdır
-            </Button>
+            {currentOrder && (
+              <Button size="sm" onClick={() => handlePrintReceipt(currentOrder)}>
+                <Printer className="mr-1 h-4 w-4" />
+                Fiş Yazdır
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Receipt Printer */}
-      <ReceiptPrinter open={isReceiptDialogOpen} onOpenChange={setIsReceiptDialogOpen} order={currentOrder} />
+      <Dialog open={isReceiptDialogOpen} onOpenChange={setIsReceiptDialogOpen}>
+        <DialogContent>
+          <ReceiptPrinter order={currentOrder} onClose={() => setIsReceiptDialogOpen(false)} />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

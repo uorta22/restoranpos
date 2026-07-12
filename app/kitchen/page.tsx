@@ -59,7 +59,7 @@ export default function KitchenPage() {
         title: "Durum güncellendi",
         description: `Sipariş durumu "${status}" olarak güncellendi.`,
       })
-    } catch (error) {
+    } catch {
       toast({
         title: "Hata",
         description: "Sipariş durumu güncellenirken bir hata oluştu.",
@@ -93,7 +93,7 @@ export default function KitchenPage() {
     }
   }
 
-  const getPriorityColor = (createdAt: string) => {
+  const getPriorityColor = (createdAt: Date | string) => {
     const orderTime = new Date(createdAt)
     const now = new Date()
     const diffMinutes = (now.getTime() - orderTime.getTime()) / (1000 * 60)
