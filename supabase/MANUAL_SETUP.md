@@ -21,11 +21,17 @@ Yalnızca durum `FRESH` ise her dosyayı ayrı bir SQL Editor sorgusu olarak ça
 
 Bir dosya hata verirse sonraki dosyaya geçme. Hata mesajı ve çalıştırılan dosya adı birlikte incelenmelidir.
 
-## 3. Kurulumu doğrula
+## 3. Temel kurulumu doğrula
 
 `manual/05_verify_installation.sql` dosyasını çalıştır. Sonuçtaki bütün satırların `status` değeri `OK` olmalıdır. `FAIL` veya `MISSING` varsa uygulamayı kullanmaya başlamadan önce düzeltilmelidir.
 
-## 4. Auth ayarları
+## 4. Onboarding temelini ekle
+
+Temel şema doğrulandıktan sonra `manual/06_onboarding_and_billing_foundation.sql` dosyasını SQL Editor içinde tek sorgu olarak çalıştır. Dosya yeni onboarding tablosunu, plan alanlarını, RLS politikasını ve güvenli RPC fonksiyonlarını birlikte kurar.
+
+Ardından `manual/07_verify_onboarding_foundation.sql` dosyasını çalıştır. Sonuçtaki bütün satırların `status` değeri `OK` olmalıdır.
+
+## 5. Auth ayarları
 
 Supabase panelinde Authentication ayarlarını şu şekilde yapılandır:
 
@@ -33,17 +39,18 @@ Supabase panelinde Authentication ayarlarını şu şekilde yapılandır:
 - E-posta doğrulaması açık.
 - Minimum parola uzunluğu en az 8.
 - Parola kuralı büyük harf, küçük harf ve rakam içeriyor.
-- Geliştirmede Site URL: `http://localhost:3000`.
-- Geliştirmede Redirect URL: `http://localhost:3000/**`.
-- Canlıya geçerken localhost adreslerini gerçek HTTPS alan adıyla birlikte güncelle.
+- Geliştirmede Site URL: `http://panel.localhost:3000`.
+- Geliştirmede Redirect URL: `http://panel.localhost:3000/**`.
+- Canlıda Site URL panel alan adı olmalı; doğrulama ve parola sıfırlama adresleri tam HTTPS URL olarak eklenmelidir.
 
-## 5. Uygulama ortamı
+## 6. Uygulama ortamı
 
 `.env.example` dosyasını temel alarak `.env.local` oluştur ve yalnızca şu tarayıcı ayarlarını gir:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- `NEXT_PUBLIC_APP_URL`
+- `NEXT_PUBLIC_MARKETING_URL`
+- `NEXT_PUBLIC_PANEL_URL`
 - İsteğe bağlı `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`
 
 Database parolası, secret key veya service-role key uygulamanın `.env.local` dosyasına eklenmemelidir. Bu proje tarayıcıdan yalnızca publishable key kullanır; veri erişimi RLS ve güvenli RPC fonksiyonlarıyla sınırlandırılır.

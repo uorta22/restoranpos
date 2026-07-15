@@ -26,7 +26,7 @@ const roleLabels: Record<MemberRole, string> = {
   courier: "Kurye",
 }
 
-export default function UsersPage() {
+export default function TeamPage() {
   const { user, isLoading: isAuthLoading, refreshUser } = useAuth()
   const router = useRouter()
   const { toast } = useToast()

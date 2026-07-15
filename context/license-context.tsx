@@ -5,15 +5,16 @@ import { getClientSupabaseInstance } from "@/lib/supabase"
 import { useAuth } from "@/context/auth-context"
 
 export const FEATURE_SETS = {
-  basic: ["menu", "orders", "tables"],
-  standard: ["menu", "orders", "tables", "kitchen", "reports", "inventory"],
-  pro: ["menu", "orders", "tables", "kitchen", "reports", "inventory", "analytics", "delivery"],
+  basic: ["menu", "orders", "tables", "reservations"],
+  standard: ["menu", "orders", "tables", "reservations", "kitchen", "reports", "inventory"],
+  pro: ["menu", "orders", "tables", "reservations", "kitchen", "reports", "inventory", "analytics", "delivery"],
 }
 
 export const FEATURE_DESCRIPTIONS = {
   menu: "Menü yönetimi",
   orders: "Sipariş yönetimi",
   tables: "Masa yönetimi",
+  reservations: "Rezervasyon yönetimi",
   kitchen: "Mutfak ekranı",
   reports: "Raporlar",
   inventory: "Stok takibi",

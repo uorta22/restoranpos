@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import type { SupabaseClient, User as SupabaseUser, UserAttributes } from "@supabase/supabase-js"
 import type { Database, MemberRole } from "@/lib/database.types"
 import { getClientSupabaseInstance } from "@/lib/supabase"
+import { getClientPanelOrigin, safeInternalPath } from "@/lib/auth-navigation"
 
 export interface User {
   id: string
@@ -27,7 +28,7 @@ interface AuthContextType {
   isLoading: boolean
   login: (email: string, password: string) => Promise<AuthResult>
   logout: () => Promise<void>
-  register: (name: string, email: string, password: string, role: string, redirectPath?: string) => Promise<AuthResult>
+  register: (name: string, email: string, password: string, redirectPath?: string) => Promise<AuthResult>
   updateProfile: (data: Partial<User>) => Promise<AuthResult>
   refreshUser: () => Promise<User | null>
 }
@@ -164,17 +165,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     name: string,
     email: string,
     password: string,
-    role: string,
     redirectPath?: string,
   ): Promise<AuthResult> => {
     setIsLoading(true)
-    void role
     const supabase = getClientSupabaseInstance()
-    const safeRedirectPath = redirectPath?.startsWith("/") && !redirectPath.startsWith("//")
-      ? redirectPath
-      : "/onboarding"
-    const confirmationUrl = new URL("/auth/confirm", window.location.origin)
-    confirmationUrl.searchParams.set("next", safeRedirectPath)
+    const nextPath = safeInternalPath(redirectPath, "/onboarding")
+    const confirmationUrl = new URL("/auth/confirm", getClientPanelOrigin())
+    confirmationUrl.searchParams.set("next", nextPath)
     const { data, error } = await supabase.auth.signUp({
       email,
       password,

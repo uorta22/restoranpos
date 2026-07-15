@@ -324,6 +324,60 @@ export type Database = {
           },
         ]
       }
+      onboarding_sessions: {
+        Row: {
+          acquisition_source: string | null
+          billing_cycle: Database["public"]["Enums"]["billing_cycle"]
+          completed_at: string | null
+          created_at: string
+          current_step: Database["public"]["Enums"]["onboarding_step"]
+          restaurant_id: string | null
+          selected_plan_id: string
+          table_count: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          acquisition_source?: string | null
+          billing_cycle?: Database["public"]["Enums"]["billing_cycle"]
+          completed_at?: string | null
+          created_at?: string
+          current_step?: Database["public"]["Enums"]["onboarding_step"]
+          restaurant_id?: string | null
+          selected_plan_id?: string
+          table_count?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          acquisition_source?: string | null
+          billing_cycle?: Database["public"]["Enums"]["billing_cycle"]
+          completed_at?: string | null
+          created_at?: string
+          current_step?: Database["public"]["Enums"]["onboarding_step"]
+          restaurant_id?: string | null
+          selected_plan_id?: string
+          table_count?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "onboarding_sessions_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: true
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "onboarding_sessions_selected_plan_id_fkey"
+            columns: ["selected_plan_id"]
+            isOneToOne: false
+            referencedRelation: "subscription_plans"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       order_items: {
         Row: {
           created_at: string
@@ -799,9 +853,14 @@ export type Database = {
       }
       restaurant_subscriptions: {
         Row: {
+          activated_at: string | null
+          billing_cycle: Database["public"]["Enums"]["billing_cycle"]
+          cancel_at_period_end: boolean
+          cancelled_at: string | null
           created_at: string
           current_period_end: string | null
           current_period_start: string | null
+          grace_ends_at: string | null
           plan_id: string
           provider_customer_id: string | null
           provider_subscription_id: string | null
@@ -811,9 +870,14 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          activated_at?: string | null
+          billing_cycle?: Database["public"]["Enums"]["billing_cycle"]
+          cancel_at_period_end?: boolean
+          cancelled_at?: string | null
           created_at?: string
           current_period_end?: string | null
           current_period_start?: string | null
+          grace_ends_at?: string | null
           plan_id: string
           provider_customer_id?: string | null
           provider_subscription_id?: string | null
@@ -823,9 +887,14 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          activated_at?: string | null
+          billing_cycle?: Database["public"]["Enums"]["billing_cycle"]
+          cancel_at_period_end?: boolean
+          cancelled_at?: string | null
           created_at?: string
           current_period_end?: string | null
           current_period_start?: string | null
+          grace_ends_at?: string | null
           plan_id?: string
           provider_customer_id?: string | null
           provider_subscription_id?: string | null
@@ -908,7 +977,9 @@ export type Database = {
           id: string
           logo_url: string | null
           name: string
+          onboarding_completed_at: string | null
           phone: string | null
+          service_modes: Database["public"]["Enums"]["order_type"][]
           slug: string
           tax_rate: number
           timezone: string
@@ -923,7 +994,9 @@ export type Database = {
           id?: string
           logo_url?: string | null
           name: string
+          onboarding_completed_at?: string | null
           phone?: string | null
+          service_modes?: Database["public"]["Enums"]["order_type"][]
           slug: string
           tax_rate?: number
           timezone?: string
@@ -938,7 +1011,9 @@ export type Database = {
           id?: string
           logo_url?: string | null
           name?: string
+          onboarding_completed_at?: string | null
           phone?: string | null
+          service_modes?: Database["public"]["Enums"]["order_type"][]
           slug?: string
           tax_rate?: number
           timezone?: string
@@ -1017,6 +1092,8 @@ export type Database = {
           name: string
           price_monthly: number
           price_yearly: number
+          trial_days: number
+          trial_enabled: boolean
           updated_at: string
         }
         Insert: {
@@ -1028,6 +1105,8 @@ export type Database = {
           name: string
           price_monthly?: number
           price_yearly?: number
+          trial_days?: number
+          trial_enabled?: boolean
           updated_at?: string
         }
         Update: {
@@ -1039,6 +1118,8 @@ export type Database = {
           name?: string
           price_monthly?: number
           price_yearly?: number
+          trial_days?: number
+          trial_enabled?: boolean
           updated_at?: string
         }
         Relationships: []
@@ -1152,6 +1233,17 @@ export type Database = {
         }
         Returns: string
       }
+      create_restaurant_from_onboarding: {
+        Args: {
+          restaurant_address?: string
+          restaurant_currency?: string
+          restaurant_email?: string
+          restaurant_name: string
+          restaurant_phone?: string
+          restaurant_timezone?: string
+        }
+        Returns: string
+      }
       create_restaurant_invitation: {
         Args: {
           invite_email: string
@@ -1182,6 +1274,10 @@ export type Database = {
           role: Database["public"]["Enums"]["member_role"]
         }[]
       }
+      complete_onboarding: {
+        Args: { starter_category_names?: string[] }
+        Returns: string
+      }
       record_order_payment: {
         Args: {
           payment_amount?: number
@@ -1190,6 +1286,21 @@ export type Database = {
           target_order_id: string
         }
         Returns: Database["public"]["Enums"]["payment_status"]
+      }
+      save_onboarding_operations: {
+        Args: {
+          requested_table_count: number
+          requested_tax_rate?: number
+          selected_service_modes: Database["public"]["Enums"]["order_type"][]
+        }
+        Returns: Database["public"]["Tables"]["onboarding_sessions"]["Row"]
+      }
+      save_onboarding_plan: {
+        Args: {
+          requested_billing_cycle: Database["public"]["Enums"]["billing_cycle"]
+          requested_plan_id: string
+        }
+        Returns: Database["public"]["Tables"]["onboarding_sessions"]["Row"]
       }
       remove_restaurant_member: {
         Args: { target_restaurant_id: string; target_user_id: string }
@@ -1227,8 +1338,17 @@ export type Database = {
         }
         Returns: Database["public"]["Enums"]["member_role"]
       }
+      start_onboarding: {
+        Args: {
+          acquisition_source?: string
+          requested_billing_cycle?: Database["public"]["Enums"]["billing_cycle"]
+          requested_plan_id?: string
+        }
+        Returns: Database["public"]["Tables"]["onboarding_sessions"]["Row"]
+      }
     }
     Enums: {
+      billing_cycle: "monthly" | "yearly"
       delivery_status:
         | "pending"
         | "assigned"
@@ -1250,6 +1370,12 @@ export type Database = {
         | "completed"
         | "cancelled"
       order_type: "dine_in" | "takeaway" | "delivery"
+      onboarding_step:
+        | "business"
+        | "operations"
+        | "plan"
+        | "setup"
+        | "complete"
       payment_method: "cash" | "card" | "online"
       payment_status:
         | "pending"
@@ -1407,6 +1533,7 @@ export const Constants = {
   },
   public: {
     Enums: {
+      billing_cycle: ["monthly", "yearly"],
       delivery_status: [
         "pending",
         "assigned",
@@ -1425,6 +1552,7 @@ export const Constants = {
       member_status: ["invited", "active", "suspended"],
       order_status: ["pending", "preparing", "ready", "completed", "cancelled"],
       order_type: ["dine_in", "takeaway", "delivery"],
+      onboarding_step: ["business", "operations", "plan", "setup", "complete"],
       payment_method: ["cash", "card", "online"],
       payment_status: [
         "pending",
@@ -1472,3 +1600,5 @@ export type ReservationStatus = Database["public"]["Enums"]["reservation_status"
 export type StockMovementType = Database["public"]["Enums"]["stock_movement_type"]
 export type DeliveryStatus = Database["public"]["Enums"]["delivery_status"]
 export type SubscriptionStatus = Database["public"]["Enums"]["subscription_status"]
+export type BillingCycle = Database["public"]["Enums"]["billing_cycle"]
+export type OnboardingStep = Database["public"]["Enums"]["onboarding_step"]

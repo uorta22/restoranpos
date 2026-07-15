@@ -16,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/context/auth-context"
 import { useToast } from "@/hooks/use-toast"
 
-export default function StorePage() {
+export default function InventoryPage() {
   const { user, isLoading: isAuthLoading } = useAuth()
   const { toast } = useToast()
   const [showSidebar, setShowSidebar] = useState(true)
@@ -48,7 +48,7 @@ export default function StorePage() {
       setInventory(inventoryRows)
     } catch (cause) {
       toast({
-        title: "Depo verileri yüklenemedi",
+        title: "Envanter verileri yüklenemedi",
         description: cause instanceof Error ? cause.message : "Veriler okunamadı.",
         variant: "destructive",
       })
@@ -143,7 +143,7 @@ export default function StorePage() {
         <main className="flex-1 overflow-auto p-4 md:p-6">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold text-gray-950">Depo Yönetimi</h1>
+              <h1 className="text-2xl font-semibold text-gray-950">Envanter Yönetimi</h1>
               <p className="mt-1 flex items-center gap-2 text-sm text-gray-500">
                 <AlertTriangle className="h-4 w-4 text-orange-600" aria-hidden="true" />
                 {lowStockCount} ürün düşük stok seviyesinde

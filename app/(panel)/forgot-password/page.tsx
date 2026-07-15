@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react"
 import Link from "next/link"
 import { ArrowLeft, Mail } from "lucide-react"
+import { getClientPanelOrigin } from "@/lib/auth-navigation"
 import { getClientSupabaseInstance } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,7 +20,7 @@ export default function ForgotPasswordPage() {
     setIsSubmitting(true)
     setError(null)
 
-    const confirmationUrl = new URL("/auth/confirm", window.location.origin)
+    const confirmationUrl = new URL("/auth/confirm", getClientPanelOrigin())
     confirmationUrl.searchParams.set("next", "/reset-password")
     const supabase = getClientSupabaseInstance()
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {

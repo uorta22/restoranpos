@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-export default function PricingPage() {
+export default function BillingPage() {
   const { license, isLoading } = useLicense()
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("monthly")
   const [plans, setPlans] = useState<Tables<"subscription_plans">[]>([])
