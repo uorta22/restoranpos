@@ -11,11 +11,11 @@ interface MarketingHeaderProps {
 }
 
 const navigation = [
-  { label: "Özellikler", href: "#ozellikler" },
-  { label: "Nasıl çalışır?", href: "#nasil-calisir" },
-  { label: "Hakkımızda", href: "#hakkimizda" },
-  { label: "Fiyatlandırma", href: "#fiyatlandirma" },
-  { label: "İletişim", href: "#iletisim" },
+  { label: "Modüller", href: "/#ozellikler" },
+  { label: "Kimler için?", href: "/#segmentler" },
+  { label: "Nasıl çalışır?", href: "/#nasil-calisir" },
+  { label: "Fiyatlandırma", href: "/#fiyatlandirma" },
+  { label: "İletişim", href: "/#iletisim" },
 ]
 
 export function MarketingHeader({ loginHref, signupHref }: MarketingHeaderProps) {

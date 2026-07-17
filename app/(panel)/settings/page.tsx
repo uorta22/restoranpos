@@ -1,15 +1,24 @@
 "use client"
 
 import { useEffect, useState, type FormEvent } from "react"
-import { Building2, MapPinned, Save } from "lucide-react"
+import { Building2, ConciergeBell, MapPinned, Save } from "lucide-react"
 import { Header } from "@/components/header"
 import { SidebarNav } from "@/components/sidebar-nav"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useAuth } from "@/context/auth-context"
 import { useToast } from "@/hooks/use-toast"
+import type { OrderType } from "@/lib/database.types"
 import { getClientSupabaseInstance } from "@/lib/supabase"
+import { cn } from "@/lib/utils"
+
+const serviceModeOptions: Array<{ id: OrderType; label: string; description: string }> = [
+  { id: "dine_in", label: "Masada servis", description: "Masa ve adisyon akışı" },
+  { id: "takeaway", label: "Gel-al", description: "Kasadan teslim siparişleri" },
+  { id: "delivery", label: "Paket servis", description: "Kurye ve teslimat akışı" },
+]
 
 export default function SettingsPage() {
   const { user, isLoading: isAuthLoading } = useAuth()
@@ -24,6 +33,7 @@ export default function SettingsPage() {
     email: "",
     taxRate: "0",
   })
+  const [serviceModes, setServiceModes] = useState<OrderType[]>([])
   const canManage = user?.memberRole === "owner" || user?.memberRole === "manager"
 
   useEffect(() => {
@@ -39,7 +49,7 @@ export default function SettingsPage() {
     const supabase = getClientSupabaseInstance()
     void supabase
       .from("restaurants")
-      .select("name, address, phone, email, tax_rate")
+      .select("name, address, phone, email, tax_rate, service_modes")
       .eq("id", user.restaurant_id)
       .single()
       .then(({ data, error }) => {
@@ -54,6 +64,7 @@ export default function SettingsPage() {
             email: data.email ?? "",
             taxRate: String(data.tax_rate),
           })
+          setServiceModes(data.service_modes ?? [])
         }
         setIsLoading(false)
       })
@@ -75,6 +86,14 @@ export default function SettingsPage() {
       })
       return
     }
+    if (serviceModes.length === 0) {
+      toast({
+        title: "Servis modeli gerekli",
+        description: "En az bir servis modeli seçili olmalıdır.",
+        variant: "destructive",
+      })
+      return
+    }
     setIsSaving(true)
     const supabase = getClientSupabaseInstance()
     const { error } = await supabase
@@ -85,6 +104,7 @@ export default function SettingsPage() {
         phone: formData.phone.trim() || null,
         email: formData.email.trim() || null,
         tax_rate: taxRate,
+        service_modes: serviceModes,
       })
       .eq("id", user.restaurant_id)
 
@@ -149,6 +169,44 @@ export default function SettingsPage() {
                   <Label htmlFor="settings-tax">KDV oranı (%)</Label>
                   <Input id="settings-tax" type="number" min="0" max="100" step="0.01" value={formData.taxRate} onChange={(event) => setFormData({ ...formData, taxRate: event.target.value })} />
                 </div>
+
+                <fieldset className="sm:col-span-2 border-t border-gray-200 pt-5">
+                  <legend className="sr-only">Servis modelleri</legend>
+                  <div className="flex items-center gap-2">
+                    <ConciergeBell className="h-5 w-5 text-orange-600" aria-hidden="true" />
+                    <h2 className="text-lg font-medium text-gray-950">Servis modelleri</h2>
+                  </div>
+                  <p className="mt-2 text-sm text-gray-600">En az bir servis modeli seçili olmalıdır.</p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    {serviceModeOptions.map((option) => {
+                      const checked = serviceModes.includes(option.id)
+                      return (
+                        <label
+                          key={option.id}
+                          className={cn(
+                            "flex cursor-pointer items-start gap-3 rounded-md border bg-white p-4 transition-colors",
+                            checked ? "border-orange-500" : "border-gray-200 hover:border-gray-400",
+                          )}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(nextChecked) => {
+                              setServiceModes((current) =>
+                                nextChecked ? [...current, option.id] : current.filter((mode) => mode !== option.id),
+                              )
+                            }}
+                            aria-label={option.label}
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium">{option.label}</span>
+                            <span className="mt-1 block text-xs leading-5 text-gray-500">{option.description}</span>
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </fieldset>
+
                 <div className="flex items-end">
                   <Button type="submit" disabled={isSaving}>
                     <Save className="mr-2 h-4 w-4" aria-hidden="true" />

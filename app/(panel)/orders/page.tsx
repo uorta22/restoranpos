@@ -18,6 +18,26 @@ import { ReceiptPrinter } from "@/components/receipt-printer"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { Order } from "@/lib/types"
+import type { OrderChannel } from "@/lib/database.types"
+
+// pos kanalı için rozet gösterilmez
+const channelBadges: Partial<Record<OrderChannel, { label: string; className: string }>> = {
+  web: { label: "Web", className: "bg-sky-50 text-sky-700 border-sky-200" },
+  mobile: { label: "Mobil", className: "bg-indigo-50 text-indigo-700 border-indigo-200" },
+  yemeksepeti: { label: "Yemeksepeti", className: "bg-red-50 text-red-700 border-red-200" },
+  getir: { label: "Getir", className: "bg-purple-50 text-purple-700 border-purple-200" },
+  trendyol: { label: "Trendyol GO", className: "bg-orange-50 text-orange-700 border-orange-200" },
+}
+
+function getChannelBadge(channel: Order["channel"]) {
+  const badge = channel ? channelBadges[channel] : undefined
+  if (!badge) return null
+  return (
+    <Badge variant="outline" className={badge.className}>
+      {badge.label}
+    </Badge>
+  )
+}
 
 export default function OrdersPage() {
   const { user, isLoading } = useAuth()
@@ -248,7 +268,10 @@ export default function OrdersPage() {
                             <CardTitle className="text-lg">Sipariş #{order.id.slice(-6)}</CardTitle>
                             <p className="text-sm text-gray-500">{formatDateTime(order.createdAt)}</p>
                           </div>
-                          {getStatusBadge(order.status)}
+                          <div className="flex flex-col items-end gap-1.5">
+                            {getStatusBadge(order.status)}
+                            {getChannelBadge(order.channel)}
+                          </div>
                         </div>
                       </CardHeader>
                       <CardContent className="pb-2">
@@ -367,7 +390,10 @@ export default function OrdersPage() {
                               <CardTitle className="text-lg">Sipariş #{order.id.slice(-6)}</CardTitle>
                               <p className="text-sm text-gray-500">{formatDateTime(order.createdAt)}</p>
                             </div>
+                            <div className="flex flex-col items-end gap-1.5">
                             {getStatusBadge(order.status)}
+                            {getChannelBadge(order.channel)}
+                          </div>
                           </div>
                         </CardHeader>
                         <CardContent className="pb-2">
@@ -452,7 +478,10 @@ export default function OrdersPage() {
                               <CardTitle className="text-lg">Sipariş #{order.id.slice(-6)}</CardTitle>
                               <p className="text-sm text-gray-500">{formatDateTime(order.createdAt)}</p>
                             </div>
+                            <div className="flex flex-col items-end gap-1.5">
                             {getStatusBadge(order.status)}
+                            {getChannelBadge(order.channel)}
+                          </div>
                           </div>
                         </CardHeader>
                         <CardContent className="pb-2">{/* Kart içeriği aynı kalacak */}</CardContent>
@@ -496,7 +525,10 @@ export default function OrdersPage() {
                               <CardTitle className="text-lg">Sipariş #{order.id.slice(-6)}</CardTitle>
                               <p className="text-sm text-gray-500">{formatDateTime(order.createdAt)}</p>
                             </div>
+                            <div className="flex flex-col items-end gap-1.5">
                             {getStatusBadge(order.status)}
+                            {getChannelBadge(order.channel)}
+                          </div>
                           </div>
                         </CardHeader>
                         <CardContent className="pb-2">{/* Kart içeriği aynı kalacak */}</CardContent>
@@ -544,7 +576,10 @@ export default function OrdersPage() {
                               <CardTitle className="text-lg">Sipariş #{order.id.slice(-6)}</CardTitle>
                               <p className="text-sm text-gray-500">{formatDateTime(order.createdAt)}</p>
                             </div>
+                            <div className="flex flex-col items-end gap-1.5">
                             {getStatusBadge(order.status)}
+                            {getChannelBadge(order.channel)}
+                          </div>
                           </div>
                         </CardHeader>
                         <CardContent className="pb-2">{/* Kart içeriği aynı kalacak */}</CardContent>
@@ -581,7 +616,10 @@ export default function OrdersPage() {
                               <CardTitle className="text-lg">Sipariş #{order.id.slice(-6)}</CardTitle>
                               <p className="text-sm text-gray-500">{formatDateTime(order.createdAt)}</p>
                             </div>
+                            <div className="flex flex-col items-end gap-1.5">
                             {getStatusBadge(order.status)}
+                            {getChannelBadge(order.channel)}
+                          </div>
                           </div>
                         </CardHeader>
                         <CardContent className="pb-2">{/* Kart içeriği aynı kalacak */}</CardContent>

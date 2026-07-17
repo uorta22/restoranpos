@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       categories: {
@@ -76,6 +51,53 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "categories_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      channel_integrations: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          last_event_at: string | null
+          provider: Database["public"]["Enums"]["order_channel"]
+          restaurant_id: string
+          settings: Json
+          status: Database["public"]["Enums"]["channel_integration_status"]
+          updated_at: string
+          webhook_secret: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          last_event_at?: string | null
+          provider: Database["public"]["Enums"]["order_channel"]
+          restaurant_id: string
+          settings?: Json
+          status?: Database["public"]["Enums"]["channel_integration_status"]
+          updated_at?: string
+          webhook_secret?: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          last_event_at?: string | null
+          provider?: Database["public"]["Enums"]["order_channel"]
+          restaurant_id?: string
+          settings?: Json
+          status?: Database["public"]["Enums"]["channel_integration_status"]
+          updated_at?: string
+          webhook_secret?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_integrations_restaurant_id_fkey"
             columns: ["restaurant_id"]
             isOneToOne: false
             referencedRelation: "restaurants"
@@ -199,6 +221,94 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "orders"
             referencedColumns: ["restaurant_id", "id"]
+          },
+        ]
+      }
+      delivery_zones: {
+        Row: {
+          created_at: string
+          delivery_fee: number
+          id: string
+          is_active: boolean
+          min_order_amount: number
+          name: string
+          polygon: Json | null
+          restaurant_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          delivery_fee?: number
+          id?: string
+          is_active?: boolean
+          min_order_amount?: number
+          name: string
+          polygon?: Json | null
+          restaurant_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          delivery_fee?: number
+          id?: string
+          is_active?: boolean
+          min_order_amount?: number
+          name?: string
+          polygon?: Json | null
+          restaurant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_zones_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      email_outbox: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          payload: Json
+          recipient: string
+          restaurant_id: string | null
+          sent_at: string | null
+          status: Database["public"]["Enums"]["email_status"]
+          template: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          payload?: Json
+          recipient: string
+          restaurant_id?: string | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["email_status"]
+          template: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          payload?: Json
+          recipient?: string
+          restaurant_id?: string | null
+          sent_at?: string | null
+          status?: Database["public"]["Enums"]["email_status"]
+          template?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_outbox_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -444,6 +554,7 @@ export type Database = {
       }
       orders: {
         Row: {
+          channel: Database["public"]["Enums"]["order_channel"]
           completed_at: string | null
           created_at: string
           created_by: string | null
@@ -451,6 +562,7 @@ export type Database = {
           customer_phone: string | null
           delivery_address: Json | null
           discount_amount: number
+          external_id: string | null
           id: string
           notes: string | null
           payment_status: Database["public"]["Enums"]["payment_status"]
@@ -467,6 +579,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          channel?: Database["public"]["Enums"]["order_channel"]
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
@@ -474,6 +587,7 @@ export type Database = {
           customer_phone?: string | null
           delivery_address?: Json | null
           discount_amount?: number
+          external_id?: string | null
           id?: string
           notes?: string | null
           payment_status?: Database["public"]["Enums"]["payment_status"]
@@ -490,6 +604,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          channel?: Database["public"]["Enums"]["order_channel"]
           completed_at?: string | null
           created_at?: string
           created_by?: string | null
@@ -497,6 +612,7 @@ export type Database = {
           customer_phone?: string | null
           delivery_address?: Json | null
           discount_amount?: number
+          external_id?: string | null
           id?: string
           notes?: string | null
           payment_status?: Database["public"]["Enums"]["payment_status"]
@@ -1168,6 +1284,70 @@ export type Database = {
           },
         ]
       }
+      webhook_events: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          event_type: string
+          external_id: string | null
+          id: string
+          integration_id: string | null
+          order_id: string | null
+          payload: Json
+          provider: Database["public"]["Enums"]["order_channel"]
+          restaurant_id: string
+          status: Database["public"]["Enums"]["webhook_event_status"]
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          event_type?: string
+          external_id?: string | null
+          id?: string
+          integration_id?: string | null
+          order_id?: string | null
+          payload?: Json
+          provider: Database["public"]["Enums"]["order_channel"]
+          restaurant_id: string
+          status?: Database["public"]["Enums"]["webhook_event_status"]
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          event_type?: string
+          external_id?: string | null
+          id?: string
+          integration_id?: string | null
+          order_id?: string | null
+          payload?: Json
+          provider?: Database["public"]["Enums"]["order_channel"]
+          restaurant_id?: string
+          status?: Database["public"]["Enums"]["webhook_event_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "webhook_events_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "channel_integrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "webhook_events_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "webhook_events_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       daily_sales: {
@@ -1197,6 +1377,10 @@ export type Database = {
       assign_delivery_courier: {
         Args: { target_courier_user_id: string; target_order_id: string }
         Returns: Database["public"]["Enums"]["delivery_status"]
+      }
+      complete_onboarding: {
+        Args: { starter_category_names?: string[] }
+        Returns: string
       }
       create_courier_invitation: {
         Args: {
@@ -1265,6 +1449,7 @@ export type Database = {
           updated_at: string
         }[]
       }
+      get_public_menu: { Args: { restaurant_slug: string }; Returns: Json }
       get_restaurant_invitation: {
         Args: { invitation_token: string }
         Returns: {
@@ -1274,9 +1459,29 @@ export type Database = {
           role: Database["public"]["Enums"]["member_role"]
         }[]
       }
-      complete_onboarding: {
-        Args: { starter_category_names?: string[] }
-        Returns: string
+      ingest_external_order: {
+        Args: {
+          event_type?: string
+          external_order_id: string
+          integration_id: string
+          payload: Json
+          webhook_secret: string
+        }
+        Returns: Json
+      }
+      place_public_order: {
+        Args: {
+          customer_email?: string
+          customer_name: string
+          customer_phone: string
+          delivery_address?: Json
+          order_items: Json
+          order_kind: Database["public"]["Enums"]["order_type"]
+          order_notes?: string
+          requested_payment_method?: Database["public"]["Enums"]["payment_method"]
+          restaurant_slug: string
+        }
+        Returns: Json
       }
       record_order_payment: {
         Args: {
@@ -1287,24 +1492,58 @@ export type Database = {
         }
         Returns: Database["public"]["Enums"]["payment_status"]
       }
+      remove_restaurant_member: {
+        Args: { target_restaurant_id: string; target_user_id: string }
+        Returns: boolean
+      }
       save_onboarding_operations: {
         Args: {
           requested_table_count: number
           requested_tax_rate?: number
           selected_service_modes: Database["public"]["Enums"]["order_type"][]
         }
-        Returns: Database["public"]["Tables"]["onboarding_sessions"]["Row"]
+        Returns: {
+          acquisition_source: string | null
+          billing_cycle: Database["public"]["Enums"]["billing_cycle"]
+          completed_at: string | null
+          created_at: string
+          current_step: Database["public"]["Enums"]["onboarding_step"]
+          restaurant_id: string | null
+          selected_plan_id: string
+          table_count: number
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "onboarding_sessions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       save_onboarding_plan: {
         Args: {
           requested_billing_cycle: Database["public"]["Enums"]["billing_cycle"]
           requested_plan_id: string
         }
-        Returns: Database["public"]["Tables"]["onboarding_sessions"]["Row"]
-      }
-      remove_restaurant_member: {
-        Args: { target_restaurant_id: string; target_user_id: string }
-        Returns: boolean
+        Returns: {
+          acquisition_source: string | null
+          billing_cycle: Database["public"]["Enums"]["billing_cycle"]
+          completed_at: string | null
+          created_at: string
+          current_step: Database["public"]["Enums"]["onboarding_step"]
+          restaurant_id: string | null
+          selected_plan_id: string
+          table_count: number
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "onboarding_sessions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       set_delivery_status: {
         Args: {
@@ -1344,17 +1583,36 @@ export type Database = {
           requested_billing_cycle?: Database["public"]["Enums"]["billing_cycle"]
           requested_plan_id?: string
         }
-        Returns: Database["public"]["Tables"]["onboarding_sessions"]["Row"]
+        Returns: {
+          acquisition_source: string | null
+          billing_cycle: Database["public"]["Enums"]["billing_cycle"]
+          completed_at: string | null
+          created_at: string
+          current_step: Database["public"]["Enums"]["onboarding_step"]
+          restaurant_id: string | null
+          selected_plan_id: string
+          table_count: number
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "onboarding_sessions"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
     }
     Enums: {
       billing_cycle: "monthly" | "yearly"
+      channel_integration_status: "pending" | "active" | "paused" | "error"
       delivery_status:
         | "pending"
         | "assigned"
         | "en_route"
         | "delivered"
         | "cancelled"
+      email_status: "queued" | "sent" | "failed"
       member_role:
         | "owner"
         | "manager"
@@ -1363,6 +1621,14 @@ export type Database = {
         | "kitchen"
         | "courier"
       member_status: "invited" | "active" | "suspended"
+      onboarding_step: "business" | "operations" | "plan" | "setup" | "complete"
+      order_channel:
+        | "pos"
+        | "web"
+        | "mobile"
+        | "yemeksepeti"
+        | "getir"
+        | "trendyol"
       order_status:
         | "pending"
         | "preparing"
@@ -1370,12 +1636,6 @@ export type Database = {
         | "completed"
         | "cancelled"
       order_type: "dine_in" | "takeaway" | "delivery"
-      onboarding_step:
-        | "business"
-        | "operations"
-        | "plan"
-        | "setup"
-        | "complete"
       payment_method: "cash" | "card" | "online"
       payment_status:
         | "pending"
@@ -1403,6 +1663,7 @@ export type Database = {
         | "cancelled"
         | "expired"
       table_status: "available" | "occupied" | "reserved"
+      webhook_event_status: "received" | "processed" | "duplicate" | "failed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1528,12 +1789,10 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       billing_cycle: ["monthly", "yearly"],
+      channel_integration_status: ["pending", "active", "paused", "error"],
       delivery_status: [
         "pending",
         "assigned",
@@ -1541,6 +1800,7 @@ export const Constants = {
         "delivered",
         "cancelled",
       ],
+      email_status: ["queued", "sent", "failed"],
       member_role: [
         "owner",
         "manager",
@@ -1550,9 +1810,17 @@ export const Constants = {
         "courier",
       ],
       member_status: ["invited", "active", "suspended"],
+      onboarding_step: ["business", "operations", "plan", "setup", "complete"],
+      order_channel: [
+        "pos",
+        "web",
+        "mobile",
+        "yemeksepeti",
+        "getir",
+        "trendyol",
+      ],
       order_status: ["pending", "preparing", "ready", "completed", "cancelled"],
       order_type: ["dine_in", "takeaway", "delivery"],
-      onboarding_step: ["business", "operations", "plan", "setup", "complete"],
       payment_method: ["cash", "card", "online"],
       payment_status: [
         "pending",
@@ -1584,6 +1852,7 @@ export const Constants = {
         "expired",
       ],
       table_status: ["available", "occupied", "reserved"],
+      webhook_event_status: ["received", "processed", "duplicate", "failed"],
     },
   },
 } as const
@@ -1602,3 +1871,7 @@ export type DeliveryStatus = Database["public"]["Enums"]["delivery_status"]
 export type SubscriptionStatus = Database["public"]["Enums"]["subscription_status"]
 export type BillingCycle = Database["public"]["Enums"]["billing_cycle"]
 export type OnboardingStep = Database["public"]["Enums"]["onboarding_step"]
+export type OrderChannel = Database["public"]["Enums"]["order_channel"]
+export type ChannelIntegrationStatus = Database["public"]["Enums"]["channel_integration_status"]
+export type WebhookEventStatus = Database["public"]["Enums"]["webhook_event_status"]
+export type EmailStatus = Database["public"]["Enums"]["email_status"]

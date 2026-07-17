@@ -19,6 +19,7 @@ import {
   ChefHat,
   UtensilsCrossed,
   TableProperties,
+  Plug,
 } from "lucide-react"
 
 const navigation: Array<{
@@ -36,6 +37,7 @@ const navigation: Array<{
   { name: "Ekip", href: "/team", icon: Users },
   { name: "Envanter", href: "/inventory", icon: Boxes },
   { name: "Raporlar", href: "/reports", icon: BarChart3 },
+  { name: "Entegrasyonlar", href: "/integrations", icon: Plug },
   { name: "Ayarlar", href: "/settings", icon: Settings },
   { name: "Abonelik", href: "/billing", icon: CreditCard },
 ]

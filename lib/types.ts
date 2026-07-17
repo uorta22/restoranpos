@@ -45,6 +45,7 @@ export enum OrderType {
 
 export interface Order {
   id: string
+  channel?: import("@/lib/database.types").OrderChannel
   items: CartItem[]
   total: number
   subtotal?: number

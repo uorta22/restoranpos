@@ -8,6 +8,9 @@ const PANEL_PUBLIC_PATHS = [
   "/invite",
   "/forgot-password",
   "/reset-password",
+  "/r",
+  "/api/integrations",
+  "/api/cron",
 ] as const
 
 const PANEL_PATHS = [
@@ -27,6 +30,7 @@ const PANEL_PATHS = [
   "/profile",
   "/users",
   "/store",
+  "/integrations",
 ] as const
 
 const MARKETING_ONLY_PATHS = ["/features", "/contact", "/privacy", "/terms", "/kvkk"] as const

@@ -232,6 +232,7 @@ async function fetchOrders(restaurantId: string, orderId?: string): Promise<Orde
     return {
       id: order.id,
       restaurant_id: order.restaurant_id,
+      channel: order.channel,
       items: itemsByOrder.get(order.id) ?? [],
       total: order.total_amount,
       subtotal: order.subtotal,

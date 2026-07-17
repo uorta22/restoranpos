@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { ArrowLeft, Check, Crown } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Check, Crown } from "lucide-react"
 import { FEATURES } from "@/lib/subscription-plans"
-import { formatCurrency } from "@/lib/utils"
+import { cn, formatCurrency, formatDate } from "@/lib/utils"
 import { getClientSupabaseInstance } from "@/lib/supabase"
 import type { Tables } from "@/lib/database.types"
 import { useLicense } from "@/context/license-context"
@@ -12,12 +12,25 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
+const CONTACT_EMAIL = process.env.NEXT_PUBLIC_CONTACT_EMAIL || "hello@restaurantpos.com"
+
+const STATUS_LABELS: Record<string, string> = {
+  trialing: "Deneme",
+  active: "Aktif",
+  past_due: "Ödeme gecikti",
+  cancelled: "İptal edildi",
+  expired: "Süresi doldu",
+}
+
+type SubscriptionSummary = Pick<Tables<"restaurant_subscriptions">, "billing_cycle" | "current_period_end">
+
 export default function BillingPage() {
-  const { license, isLoading } = useLicense()
+  const { license, isLoading, isTrialExpired, getRemainingDays } = useLicense()
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("monthly")
   const [plans, setPlans] = useState<Tables<"subscription_plans">[]>([])
   const [isPlansLoading, setIsPlansLoading] = useState(true)
   const [plansError, setPlansError] = useState<string | null>(null)
+  const [subscription, setSubscription] = useState<SubscriptionSummary | null>(null)
 
   useEffect(() => {
     let active = true
@@ -39,6 +52,26 @@ export default function BillingPage() {
     }
   }, [])
 
+  useEffect(() => {
+    // license.id abonelik kaydındaki restaurant_id değeridir
+    if (!license?.id) return
+    let active = true
+    const supabase = getClientSupabaseInstance()
+    void supabase
+      .from("restaurant_subscriptions")
+      .select("billing_cycle, current_period_end")
+      .eq("restaurant_id", license.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!active) return
+        setSubscription(data ?? null)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [license?.id])
+
   if (isLoading || isPlansLoading) {
     return (
       <main className="grid min-h-screen place-items-center bg-gray-50">
@@ -46,6 +79,18 @@ export default function BillingPage() {
       </main>
     )
   }
+
+  const trialExpired = isTrialExpired()
+  const remainingDays = getRemainingDays()
+  const currentPlanName = license ? (plans.find((plan) => plan.id === license.plan)?.name ?? license.plan) : null
+  const statusLabel = license ? (STATUS_LABELS[license.status] ?? license.status) : null
+  const statusTone =
+    license?.status === "active"
+      ? "border-green-200 bg-green-50 text-green-700"
+      : license?.status === "trialing"
+        ? "border-orange-200 bg-orange-50 text-orange-700"
+        : "border-red-200 bg-red-50 text-red-700"
+  const periodEnd = subscription?.current_period_end ?? license?.validUntil ?? null
 
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-10 sm:py-14">
@@ -67,6 +112,60 @@ export default function BillingPage() {
             </TabsList>
           </Tabs>
         </div>
+
+        {license && (
+          <Card className="mt-8">
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <CardTitle className="text-lg">Mevcut abonelik</CardTitle>
+                <span className={cn("inline-flex items-center border px-2.5 py-0.5 text-xs font-medium", statusTone)}>
+                  {statusLabel}
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-gray-500">Plan</dt>
+                  <dd className="mt-1 text-sm font-medium text-gray-950">{currentPlanName}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-gray-500">Kalan gün</dt>
+                  <dd className="mt-1 text-sm font-medium text-gray-950">{remainingDays} gün</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-gray-500">Faturalama dönemi</dt>
+                  <dd className="mt-1 text-sm font-medium text-gray-950">
+                    {subscription ? (subscription.billing_cycle === "yearly" ? "Yıllık" : "Aylık") : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-gray-500">Dönem bitişi</dt>
+                  <dd className="mt-1 text-sm font-medium text-gray-950">
+                    {periodEnd ? formatDate(new Date(periodEnd)) : "—"}
+                  </dd>
+                </div>
+              </dl>
+
+              {trialExpired && (
+                <div className="mt-5 flex items-start gap-3 border-l-2 border-red-600 bg-red-50 p-4">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" aria-hidden="true" />
+                  <div>
+                    <p className="text-sm font-medium text-red-800">Deneme süreniz sona erdi</p>
+                    <p className="mt-1 text-sm text-red-700">
+                      Panele kesintisiz erişim için aboneliğinizi etkinleştirmeniz gerekiyor.
+                    </p>
+                    <Button asChild size="sm" className="mt-3 bg-red-600 text-white hover:bg-red-700">
+                      <a href={`mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent("Abonelik aktivasyonu")}`}>
+                        Destek ile iletişime geçin
+                      </a>
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {plansError ? (
           <p className="mt-8 border-l-2 border-red-600 py-2 pl-4 text-sm text-red-700">{plansError}</p>

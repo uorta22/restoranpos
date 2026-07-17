@@ -32,6 +32,7 @@ export const PANEL_ROUTE_RULES: readonly PanelRouteRule[] = [
   { path: "/inventory", roles: management, feature: "inventory" },
   { path: "/reports", roles: [...management, "cashier"], feature: "reports" },
   { path: "/settings", roles: management },
+  { path: "/integrations", roles: management },
   { path: "/billing", roles: ["owner"] },
   { path: "/profile", roles: allRoles },
 ]
