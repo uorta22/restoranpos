@@ -67,6 +67,18 @@ export async function proxy(request: NextRequest) {
 
   if (isMarketingOnlyPath(pathname)) return redirectToSurface(routingUrl, "marketing", pathname)
 
+  // E-posta doğrulama linki Site URL fallback'i nedeniyle köke (ör. /?code=) düşerse
+  // doğrulama route'una taşı; aksi halde kök /login'e yönlenip kod/token kaybolur.
+  if (!pathname.startsWith("/auth")) {
+    const hasConfirmationParam =
+      request.nextUrl.searchParams.has("code") || request.nextUrl.searchParams.has("token_hash")
+    if (hasConfirmationParam) {
+      const confirmUrl = request.nextUrl.clone()
+      confirmUrl.pathname = "/auth/confirm"
+      return NextResponse.redirect(confirmUrl)
+    }
+  }
+
   const legacyPath = getLegacyPanelPath(pathname)
   if (legacyPath) {
     const redirectUrl = request.nextUrl.clone()
