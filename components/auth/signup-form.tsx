@@ -15,7 +15,7 @@ import { useToast } from "@/hooks/use-toast"
 
 const planLabels: Record<SignupPlanId, string> = {
   basic: "Temel",
-  standard: "Standart",
+  standard: "Her Şey Dahil",
   pro: "Profesyonel",
 }
 

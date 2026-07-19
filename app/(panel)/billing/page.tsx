@@ -102,8 +102,8 @@ export default function BillingPage() {
 
         <div className="mt-7 flex flex-wrap items-end justify-between gap-5">
           <div>
-            <h1 className="text-3xl font-semibold text-gray-950">Abonelik planları</h1>
-            <p className="mt-2 text-sm text-gray-600">İşletmenizin kullandığı modülleri ve dönem fiyatlarını karşılaştırın.</p>
+            <h1 className="text-3xl font-semibold text-gray-950">Aboneliğiniz</h1>
+            <p className="mt-2 text-sm text-gray-600">Tüm modüller tek pakette; aylık veya yıllık dönem fiyatını görüntüleyin.</p>
           </div>
           <Tabs value={billingCycle} onValueChange={(value) => setBillingCycle(value as "monthly" | "yearly")}>
             <TabsList>
@@ -170,7 +170,7 @@ export default function BillingPage() {
         {plansError ? (
           <p className="mt-8 border-l-2 border-red-600 py-2 pl-4 text-sm text-red-700">{plansError}</p>
         ) : (
-        <div className="mt-8 grid gap-5 lg:grid-cols-3">
+        <div className="mt-8 grid max-w-md gap-5">
           {plans.map((plan) => {
             const isCurrent = license?.plan === plan.id
             const price = billingCycle === "yearly" ? plan.price_yearly : plan.price_monthly

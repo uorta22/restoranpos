@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   CircleAlert,
   ClipboardCheck,
-  CreditCard,
   Loader2,
   LogOut,
   Settings2,
@@ -19,9 +18,8 @@ import {
 import { useAuth } from "@/context/auth-context"
 import type { SignupBillingCycle, SignupPlanId } from "@/lib/auth-navigation"
 import type { BillingCycle, OnboardingStep, OrderType, Tables } from "@/lib/database.types"
-import { FEATURES } from "@/lib/subscription-plans"
 import { getClientSupabaseInstance } from "@/lib/supabase"
-import { cn, formatCurrency, validateEmail } from "@/lib/utils"
+import { cn, validateEmail } from "@/lib/utils"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -43,10 +41,11 @@ interface DatabaseError {
   message?: string
 }
 
+// Tek 'her şey dahil' plana geçildiği için plan seçimi adımı kullanıcıya gösterilmez;
+// plan otomatik atanır (aşağıdaki auto-advance efekti). Adımlar: 3 kullanıcı adımı + tamam.
 const steps: Array<{ id: OnboardingStep; label: string; icon: typeof Building2 }> = [
   { id: "business", label: "İşletme", icon: Building2 },
   { id: "operations", label: "Operasyon", icon: Settings2 },
-  { id: "plan", label: "Plan", icon: CreditCard },
   { id: "setup", label: "Kurulum", icon: ClipboardCheck },
   { id: "complete", label: "Tamam", icon: CheckCircle2 },
 ]
@@ -200,6 +199,30 @@ export function OnboardingFlow({ initialPlan, initialBillingCycle, acquisitionSo
     [plans, selectedPlan],
   )
 
+  // Tek plan modeli: oturum 'plan' adımına geldiğinde plan otomatik atanır ve
+  // kullanıcı doğrudan kuruluma geçer. (Devam eden eski oturumları da ilerletir.)
+  useEffect(() => {
+    if (activeStep !== "plan") return
+    let cancelled = false
+    const advancePlan = async () => {
+      const supabase = getClientSupabaseInstance()
+      const { data, error } = await supabase.rpc("save_onboarding_plan", {
+        requested_plan_id: selectedPlan,
+        requested_billing_cycle: billingCycle,
+      })
+      if (cancelled) return
+      if (error || !data) {
+        setStepError(getFriendlyError(error, "Kurulum adımına geçilemedi. Lütfen tekrar deneyin."))
+      } else {
+        setSession(data)
+      }
+    }
+    void advancePlan()
+    return () => {
+      cancelled = true
+    }
+  }, [activeStep, selectedPlan, billingCycle])
+
   const handleBusinessSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setStepError(null)
@@ -267,29 +290,6 @@ export function OnboardingFlow({ initialPlan, initialBillingCycle, acquisitionSo
 
     if (error || !data) {
       setStepError(getFriendlyError(error, "Operasyon ayarları kaydedilemedi. Lütfen tekrar deneyin."))
-    } else {
-      setSession(data)
-    }
-    setIsSaving(false)
-  }
-
-  const handlePlanSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setStepError(null)
-    if (!selectedPlanData) {
-      setStepError("Devam etmek için geçerli bir plan seçin.")
-      return
-    }
-
-    setIsSaving(true)
-    const supabase = getClientSupabaseInstance()
-    const { data, error } = await supabase.rpc("save_onboarding_plan", {
-      requested_plan_id: selectedPlan,
-      requested_billing_cycle: billingCycle,
-    })
-
-    if (error || !data) {
-      setStepError(getFriendlyError(error, "Plan seçimi kaydedilemedi. Lütfen tekrar deneyin."))
     } else {
       setSession(data)
     }
@@ -415,9 +415,18 @@ export function OnboardingFlow({ initialPlan, initialBillingCycle, acquisitionSo
             </Alert>
           )}
 
+          {activeStep === "plan" && (
+            <div className="grid min-h-64 place-items-center" aria-live="polite">
+              <div className="flex items-center gap-3 text-sm text-gray-600">
+                <Loader2 className="h-5 w-5 animate-spin text-orange-600" aria-hidden="true" />
+                Planınız hazırlanıyor...
+              </div>
+            </div>
+          )}
+
           {activeStep === "business" && (
             <div className="max-w-2xl">
-              <p className="text-sm font-semibold text-orange-700">1 / 4</p>
+              <p className="text-sm font-semibold text-orange-700">1 / 3</p>
               <h1 className="mt-2 text-3xl font-semibold">İşletmenizi tanımlayın</h1>
               <p className="mt-3 text-sm leading-6 text-gray-600">Bu bilgiler fişlerde, raporlarda ve ekip ekranlarında kullanılacak.</p>
 
@@ -504,7 +513,7 @@ export function OnboardingFlow({ initialPlan, initialBillingCycle, acquisitionSo
 
           {activeStep === "operations" && (
             <div className="max-w-3xl">
-              <p className="text-sm font-semibold text-orange-700">2 / 4</p>
+              <p className="text-sm font-semibold text-orange-700">2 / 3</p>
               <h1 className="mt-2 text-3xl font-semibold">Operasyon modelinizi seçin</h1>
               <p className="mt-3 text-sm leading-6 text-gray-600">Panel, seçtiğiniz servis biçimlerine göre başlangıç ayarlarını hazırlayacak.</p>
 
@@ -571,96 +580,7 @@ export function OnboardingFlow({ initialPlan, initialBillingCycle, acquisitionSo
 
                 <Button type="submit" disabled={isSaving}>
                   {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : <ArrowRight className="mr-2 h-4 w-4" aria-hidden="true" />}
-                  Kaydet ve plan seçimine geç
-                </Button>
-              </form>
-            </div>
-          )}
-
-          {activeStep === "plan" && (
-            <div className="max-w-4xl">
-              <p className="text-sm font-semibold text-orange-700">3 / 4</p>
-              <div className="mt-2 flex flex-wrap items-end justify-between gap-5">
-                <div>
-                  <h1 className="text-3xl font-semibold">Abonelik planınızı seçin</h1>
-                  <p className="mt-3 text-sm leading-6 text-gray-600">Deneme süresince ücret alınmaz; ödeme bağlantısı sonraki fazda eklenecek.</p>
-                </div>
-                <div className="inline-flex rounded-md border border-gray-300 bg-white p-1" aria-label="Faturalama dönemi">
-                  {(["monthly", "yearly"] as BillingCycle[]).map((cycle) => (
-                    <button
-                      key={cycle}
-                      type="button"
-                      className={cn(
-                        "h-9 rounded-sm px-4 text-sm font-medium",
-                        billingCycle === cycle ? "bg-gray-950 text-white" : "text-gray-600 hover:text-gray-950",
-                      )}
-                      onClick={() => setBillingCycle(cycle)}
-                      aria-pressed={billingCycle === cycle}
-                    >
-                      {cycle === "monthly" ? "Aylık" : "Yıllık"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <form onSubmit={handlePlanSubmit} className="mt-8">
-                <fieldset>
-                  <legend className="sr-only">Abonelik planı</legend>
-                  <div className="grid gap-4 lg:grid-cols-3">
-                    {plans.map((plan) => {
-                      const checked = selectedPlan === plan.id
-                      const price = billingCycle === "monthly" ? plan.price_monthly : plan.price_yearly
-                      return (
-                        <label
-                          key={plan.id}
-                          className={cn(
-                            "relative flex cursor-pointer flex-col rounded-md border bg-white p-5 transition-colors",
-                            checked ? "border-orange-500 ring-1 ring-orange-500" : "border-gray-200 hover:border-gray-400",
-                          )}
-                        >
-                          <input
-                            type="radio"
-                            name="subscription-plan"
-                            value={plan.id}
-                            checked={checked}
-                            onChange={() => setSelectedPlan(plan.id as SignupPlanId)}
-                            className="sr-only"
-                          />
-                          <span className="flex items-start justify-between gap-3">
-                            <span className="text-lg font-semibold">{plan.name}</span>
-                            <span
-                              className={cn(
-                                "grid h-5 w-5 shrink-0 place-items-center rounded-full border",
-                                checked ? "border-orange-600 bg-orange-600 text-white" : "border-gray-300",
-                              )}
-                            >
-                              {checked && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
-                            </span>
-                          </span>
-                          <span className="mt-3 text-2xl font-semibold">
-                            {formatCurrency(price)}
-                            <span className="ml-1 text-sm font-normal text-gray-500">/{billingCycle === "monthly" ? "ay" : "yıl"}</span>
-                          </span>
-                          <span className="mt-2 text-sm leading-6 text-gray-600">{plan.description}</span>
-                          <span className="mt-5 border-t border-gray-200 pt-4 text-xs font-medium text-green-700">
-                            {plan.trial_days} gün ücretsiz deneme
-                          </span>
-                          <ul className="mt-4 space-y-2">
-                            {plan.features.slice(0, 5).map((featureId) => (
-                              <li key={featureId} className="flex items-start gap-2 text-xs leading-5 text-gray-600">
-                                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-green-600" aria-hidden="true" />
-                                {FEATURES.find((feature) => feature.id === featureId)?.name ?? featureId}
-                              </li>
-                            ))}
-                          </ul>
-                        </label>
-                      )
-                    })}
-                  </div>
-                </fieldset>
-                <Button type="submit" className="mt-7" disabled={isSaving}>
-                  {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : <ArrowRight className="mr-2 h-4 w-4" aria-hidden="true" />}
-                  Planı kaydet ve kuruluma geç
+                  Kaydet ve kuruluma geç
                 </Button>
               </form>
             </div>
@@ -668,7 +588,7 @@ export function OnboardingFlow({ initialPlan, initialBillingCycle, acquisitionSo
 
           {activeStep === "setup" && (
             <div className="max-w-3xl">
-              <p className="text-sm font-semibold text-orange-700">4 / 4</p>
+              <p className="text-sm font-semibold text-orange-700">3 / 3</p>
               <h1 className="mt-2 text-3xl font-semibold">Başlangıç verilerini hazırlayın</h1>
               <p className="mt-3 text-sm leading-6 text-gray-600">Seçilen kategoriler ve masa kayıtları işletmenize bir kez eklenecek.</p>
 

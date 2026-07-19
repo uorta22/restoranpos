@@ -10,39 +10,24 @@ export const FEATURES = [
   { id: "delivery", name: "Kurye ve teslimat" },
 ]
 
-export const PLANS = [
-  {
-    id: "basic",
-    name: "Temel",
-    description: "Küçük işletmeler için temel özellikler",
-    price: 199,
-    yearlyPrice: 1990,
-    features: ["menu", "orders", "tables", "reservations"],
-  },
-  {
-    id: "standard",
-    name: "Standart",
-    description: "Orta ölçekli işletmeler için ideal",
-    price: 399,
-    yearlyPrice: 3990,
-    features: ["menu", "orders", "tables", "reservations", "kitchen", "reports", "inventory"],
-  },
-  {
-    id: "pro",
-    name: "Profesyonel",
-    description: "Büyük işletmeler için tam kapsamlı çözüm",
-    price: 699,
-    yearlyPrice: 6990,
-    features: [
-      "menu",
-      "orders",
-      "tables",
-      "reservations",
-      "kitchen",
-      "reports",
-      "inventory",
-      "analytics",
-      "delivery",
-    ],
-  },
-]
+// Tek 'her şey dahil' plan. id 'standard' korunur (signup/onboarding varsayılanı buna bağlı).
+export const SINGLE_PLAN = {
+  id: "standard",
+  name: "Her Şey Dahil",
+  description: "Tüm modüller tek fiyatta — eklenti yok, komisyon yok.",
+  price: 899,
+  yearlyPrice: 8990,
+  features: [
+    "menu",
+    "orders",
+    "tables",
+    "reservations",
+    "kitchen",
+    "reports",
+    "inventory",
+    "analytics",
+    "delivery",
+  ],
+}
+
+export const PLANS = [SINGLE_PLAN]
